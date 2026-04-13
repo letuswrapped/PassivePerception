@@ -135,8 +135,8 @@ kill_progress() {
   osascript -e 'tell application "System Events" to keystroke return' 2>/dev/null
 }
 
-# ── Check architecture ───────────────────────────────────────────────────────
-if [ "$(uname -m)" != "arm64" ]; then
+# ── Check architecture (use sysctl to detect true hardware, not Rosetta) ─────
+if ! sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi "apple"; then
   alert "Passive Perception requires Apple Silicon (M1/M2/M3/M4/M5). This Mac is not supported."
   exit 1
 fi
