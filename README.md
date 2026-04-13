@@ -22,7 +22,18 @@ All processing happens on your machine. No cloud APIs, no subscriptions. Audio i
 - **Homebrew** ([install here](https://brew.sh))
 - **HuggingFace account** with a [read token](https://huggingface.co/settings/tokens) — needed for the speaker diarization model
 
-## Quick Start
+## Install
+
+1. Download **PassivePerception-1.0.0.dmg** from the [latest release](https://github.com/letuswrapped/PassivePerception/releases/latest)
+2. Open the DMG and drag **Passive Perception** to your Applications folder
+3. **Important:** Right-click (or Control-click) the app and select **Open** the first time. macOS blocks unsigned apps by default — this only needs to be done once.
+4. The app handles all setup on first launch (Python, dependencies, audio driver)
+
+> **Still blocked?** Open Terminal and run: `xattr -cr "/Applications/Passive Perception.app"` then try again.
+
+## Quick Start (from source)
+
+If you prefer to run from source instead of the .app:
 
 ```bash
 # Clone the repo
