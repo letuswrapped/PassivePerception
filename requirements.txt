@@ -1,0 +1,38 @@
+# Transcription — Apple Silicon (Neural Engine)
+mlx-whisper>=0.4.0
+
+# Transcription — fallback (Windows / Intel Mac / no MLX)
+faster-whisper>=1.2.1
+
+# Speaker diarization (post-session)
+pyannote-audio>=4.0
+
+# Audio capture & processing
+sounddevice>=0.4.6
+numpy>=1.24
+scipy>=1.11
+
+# Web server
+fastapi>=0.109
+uvicorn[standard]>=0.27
+websockets>=12.0
+
+# Data models
+pydantic>=2.5
+pydantic-settings>=2.1
+
+# LLM — Apple Silicon Neural Engine (same MLX ecosystem as mlx-whisper)
+mlx-lm>=0.19
+
+# Config & env
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# HTTP client (server readiness check)
+httpx>=0.27
+
+# Native app window
+pywebview>=5.0
+
+# Diagnostics
+psutil>=5.9

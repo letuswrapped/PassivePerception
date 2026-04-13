@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Environment & secrets
+.env
+player_context.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+
+# Session data (user-generated)
+sessions/
+tmp/
+
+# Debug artifacts
+debug_audio.wav
+test_output.wav
+debug_pipeline.py
+test_capture.py
+
+# Claude / Serena (dev tooling)
+.claude/
+.serena/
+.codesight/
+
+# Planning docs (not needed for users)
+DND-SESSION-SCRIBE-PLAN.md

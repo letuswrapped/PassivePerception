@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FEFAE0"/>
+      <stop offset="100%" stop-color="#F5F0D0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- D20 — centered, each face a different brand color (light top → dark bottom) -->
+  <g transform="translate(256, 256)">
+    <!--
+      Points:
+      top:         0, -200
+      upper-left: -173, -100
+      upper-right: 173, -100
+      center:      0, -20
+      inner-left: -107, 100
+      inner-right: 107, 100
+      left:       -173, 100
+      right:       173, 100
+      bottom:      0, 200
+    -->
+
+    <polygon points="0,-200 -173,-100 0,-20" fill="#2C3020"/>
+    <polygon points="0,-200 173,-100 0,-20" fill="#DDA15E"/>
+    <polygon points="-173,-100 -107,100 0,-20" fill="#FEFAE0"/>
+    <polygon points="173,-100 107,100 0,-20" fill="#4A5038"/>
+    <polygon points="0,-20 -107,100 107,100" fill="#DDA15E" opacity="0.5"/>
+    <polygon points="-173,-100 -173,100 -107,100" fill="#807D5C"/>
+    <polygon points="173,-100 173,100 107,100" fill="#CDC8B0"/>
+    <polygon points="-173,100 -107,100 0,200" fill="#1A1D12"/>
+    <polygon points="173,100 107,100 0,200" fill="#9A9678"/>
+
+    <!-- Wireframe edges on top -->
+    <g fill="none" stroke="#1A1D12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" opacity="0.4">
+      <!-- Outer hex -->
+      <polygon points="0,-200 173,-100 173,100 0,200 -173,100 -173,-100"/>
+      <!-- Inner structure -->
+      <line x1="0" y1="-200" x2="0" y2="-20"/>
+      <line x1="-173" y1="-100" x2="0" y2="-20"/>
+      <line x1="173" y1="-100" x2="0" y2="-20"/>
+      <line x1="-173" y1="-100" x2="-107" y2="100"/>
+      <line x1="173" y1="-100" x2="107" y2="100"/>
+      <line x1="0" y1="-20" x2="-107" y2="100"/>
+      <line x1="0" y1="-20" x2="107" y2="100"/>
+      <line x1="-173" y1="100" x2="-107" y2="100"/>
+      <line x1="173" y1="100" x2="107" y2="100"/>
+      <line x1="-107" y1="100" x2="0" y2="200"/>
+      <line x1="107" y1="100" x2="0" y2="200"/>
+    </g>
+  </g>
+</svg>
