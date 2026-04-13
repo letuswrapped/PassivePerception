@@ -26,7 +26,7 @@ All processing happens on your machine. No cloud APIs, no subscriptions. Audio i
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/PassivePerception.git
+git clone https://github.com/letuswrapped/PassivePerception.git
 cd PassivePerception
 
 # Run the setup script (installs Python 3.11, dependencies, BlackHole, etc.)
