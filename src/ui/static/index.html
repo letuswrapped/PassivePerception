@@ -27,6 +27,12 @@
     <button id="btn-start">Begin Session</button>
     <button id="btn-new">New Session</button>
     <button id="sessions-btn">Archives</button>
+    <button id="settings-btn" title="Settings">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8" cy="8" r="2.5"/>
+        <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M2.9 2.9l1.05 1.05M12.05 12.05l1.05 1.05M2.9 13.1l1.05-1.05M12.05 3.95l1.05-1.05"/>
+      </svg>
+    </button>
     <div id="processing-banner" style="display:none;">
       <span id="processing-msg"></span>
     </div>
@@ -106,6 +112,98 @@
   <button id="rename-confirm">Rename</button>
 </div>
 
+<!-- Onboarding Walkthrough -->
+<div id="onboarding-overlay" class="setup-overlay" style="display:none;">
+  <div class="setup-modal onboarding-modal">
+
+    <!-- Step indicators -->
+    <div class="onboarding-steps">
+      <div class="onboarding-dot active" data-step="0"></div>
+      <div class="onboarding-dot" data-step="1"></div>
+      <div class="onboarding-dot" data-step="2"></div>
+    </div>
+
+    <!-- Step 0: Welcome -->
+    <div class="onboarding-page active" data-step="0">
+      <div class="onboarding-icon">
+        <img src="/static/icon.svg" alt="Passive Perception" style="width:80px;height:80px;border-radius:16px;" />
+      </div>
+      <div class="setup-header" style="text-align:center;">Welcome to Passive Perception</div>
+      <p class="setup-sub" style="text-align:center;">
+        Your personal D&D session scribe. It listens to your game, transcribes everything, identifies who's speaking, and writes your campaign notes automatically.
+      </p>
+      <p class="setup-sub" style="text-align:center;color:var(--text-sub);">
+        Let's get you set up in a few quick steps.
+      </p>
+    </div>
+
+    <!-- Step 1: Audio Routing -->
+    <div class="onboarding-page" data-step="1">
+      <div class="setup-header">Set Up Audio Routing</div>
+      <p class="setup-sub">
+        The BlackHole audio driver was installed with the app. Now you need to create a Multi-Output Device so you can hear your game <em>and</em> the app can capture the audio.
+      </p>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">1</div>
+        <div>Open <strong>Audio MIDI Setup</strong><br>
+          <span class="onboarding-hint">Applications → Utilities → Audio MIDI Setup</span>
+          <button class="onboarding-open-btn" onclick="fetch('/system/open-midi-setup').catch(()=>{})">Open Audio MIDI Setup</button>
+        </div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">2</div>
+        <div>Click the <strong>+</strong> button at the bottom-left and select <strong>"Create Multi-Output Device"</strong></div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">3</div>
+        <div>Check <strong>both</strong> your headphones/speakers <strong>AND</strong> BlackHole 2ch</div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">4</div>
+        <div>Right-click the new device → <strong>"Use This Device For Sound Output"</strong></div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">5</div>
+        <div>In <strong>Discord</strong> Settings → Voice → Output Device → select <strong>"Multi-Output Device"</strong></div>
+      </div>
+    </div>
+
+    <!-- Step 2: Ready -->
+    <div class="onboarding-page" data-step="2">
+      <div class="onboarding-icon" style="font-size:48px;">⚔️</div>
+      <div class="setup-header" style="text-align:center;">You're All Set!</div>
+      <p class="setup-sub" style="text-align:center;">
+        Here's how it works:
+      </p>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">1</div>
+        <div>Select <strong>"BlackHole 2ch"</strong> as the audio input device in the top bar</div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">2</div>
+        <div>Name your session (e.g. "Session 14 — The Dragon's Lair")</div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">3</div>
+        <div>Click <strong>"Begin Session"</strong> — the transcript and notes update live as you play</div>
+      </div>
+      <div class="onboarding-instruction">
+        <div class="onboarding-step-num">4</div>
+        <div>When you're done, click <strong>"End Session"</strong> and export your notes</div>
+      </div>
+      <p class="setup-sub" style="text-align:center;margin-top:16px;color:var(--text-sub);">
+        Roll for initiative. The scribe is listening.
+      </p>
+    </div>
+
+    <!-- Navigation -->
+    <div class="onboarding-nav">
+      <button id="onboarding-back" class="setup-btn-ghost" style="visibility:hidden;">Back</button>
+      <button id="onboarding-next" class="setup-btn-primary">Get Started</button>
+    </div>
+  </div>
+</div>
+
 <!-- Player Setup Modal -->
 <div id="setup-overlay" class="setup-overlay" style="display:none;">
   <div class="setup-modal">
@@ -172,6 +270,170 @@
     <div class="setup-actions">
       <button id="setup-skip" class="setup-btn-ghost">Skip for Now</button>
       <button id="setup-save" class="setup-btn-primary">Save & Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Panel -->
+<div id="settings-overlay" class="settings-overlay" style="display:none;">
+  <div class="settings-panel">
+    <div class="settings-header">
+      <span>Settings</span>
+      <button id="settings-close" class="settings-close">&times;</button>
+    </div>
+
+    <!-- Appearance -->
+    <div class="settings-section">
+      <div class="settings-section-title">Appearance</div>
+      <div class="settings-row">
+        <span class="settings-label">Theme</span>
+        <div class="settings-toggle-group" id="theme-toggle">
+          <button class="settings-toggle-btn active" data-theme="light">Light</button>
+          <button class="settings-toggle-btn" data-theme="dark">Dark</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Microphone -->
+    <div class="settings-section">
+      <div class="settings-section-title">Your Microphone</div>
+      <p class="settings-hint">Select your mic so the app captures your voice alongside Discord audio.</p>
+      <div class="settings-row">
+        <select id="settings-mic-select" class="settings-mic-select">
+          <option value="">None (Discord audio only)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Player Info -->
+    <div class="settings-section">
+      <div class="settings-section-title">Player & Character</div>
+      <div class="setup-field">
+        <label for="settings-player-name">Your Name</label>
+        <input type="text" id="settings-player-name" placeholder="e.g. Colby" />
+      </div>
+      <div class="setup-field">
+        <label for="settings-char-name">Character Name</label>
+        <input type="text" id="settings-char-name" placeholder="e.g. Thorn Ironbark" />
+      </div>
+      <div class="setup-row">
+        <div class="setup-field">
+          <label for="settings-char-race">Race</label>
+          <input type="text" id="settings-char-race" placeholder="e.g. Half-Elf" />
+        </div>
+        <div class="setup-field">
+          <label for="settings-char-class">Class</label>
+          <input type="text" id="settings-char-class" placeholder="e.g. Ranger" />
+        </div>
+      </div>
+      <div class="setup-field">
+        <label for="settings-char-subclass">Subclass</label>
+        <input type="text" id="settings-char-subclass" placeholder="e.g. Gloom Stalker" />
+      </div>
+      <div class="setup-field">
+        <label for="settings-char-bio">Character Bio / Backstory</label>
+        <textarea id="settings-char-bio" rows="3" placeholder="Backstory, goals, allies, enemies…"></textarea>
+      </div>
+      <div style="text-align:right;margin-top:8px;">
+        <button id="settings-save-player" class="setup-btn-primary" style="padding:7px 16px;font-size:13px;">Save Changes</button>
+      </div>
+    </div>
+
+    <!-- Obsidian Integration -->
+    <div class="settings-section">
+      <div class="settings-section-title">Obsidian Integration</div>
+
+      <!-- Not connected state -->
+      <div id="obsidian-disconnected">
+        <div class="settings-integration">
+          <div class="settings-integration-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.48 2C5.33 2 4.28 2.7 3.88 3.78L2.07 8.56C1.84 9.17 2.04 9.85 2.55 10.24L9.42 15.38C9.76 15.63 10.22 15.63 10.56 15.38L17.44 10.24C17.95 9.85 18.15 9.17 17.92 8.56L16.11 3.78C15.71 2.7 14.66 2 13.51 2H6.48Z"/>
+              <path d="M10 15.5V18M6.5 17L10 18L13.5 17" stroke="currentColor" stroke-width="1" fill="none"/>
+            </svg>
+          </div>
+          <div class="settings-integration-info">
+            <div class="settings-integration-name">Obsidian</div>
+            <div class="settings-integration-desc">Auto-export session notes & transcript to your vault</div>
+          </div>
+          <button id="obsidian-connect-btn" class="settings-connect-btn">Connect</button>
+        </div>
+      </div>
+
+      <!-- Setup / connected state -->
+      <div id="obsidian-setup" style="display:none;">
+        <div class="setup-field">
+          <label>Vault Path</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="obsidian-vault-path" placeholder="/Users/you/ObsidianVault" style="flex:1;" />
+            <button id="obsidian-browse" class="setup-btn-ghost" style="padding:8px 14px;font-size:12px;white-space:nowrap;">Browse</button>
+          </div>
+        </div>
+        <div class="setup-field">
+          <label>Subfolder</label>
+          <input type="text" id="obsidian-subfolder" placeholder="D&D Sessions" value="D&D Sessions" />
+          <div class="settings-hint" style="margin-top:4px;">Notes will be saved inside this folder in your vault.</div>
+        </div>
+        <div class="settings-row" style="margin-top:12px;margin-bottom:16px;">
+          <span class="settings-label">Auto-export on session end</span>
+          <div class="settings-toggle-group" id="obsidian-auto-toggle">
+            <button class="settings-toggle-btn active" data-val="true">On</button>
+            <button class="settings-toggle-btn" data-val="false">Off</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="obsidian-disconnect" class="setup-btn-ghost" style="padding:7px 14px;font-size:12px;color:var(--danger);border-color:var(--danger);">Disconnect</button>
+          <button id="obsidian-save" class="setup-btn-primary" style="padding:7px 16px;font-size:13px;">Save</button>
+        </div>
+        <div id="obsidian-status" style="margin-top:10px;font-size:12px;color:var(--text-faint);"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Archives Panel -->
+<div id="archives-overlay" class="settings-overlay" style="display:none;">
+  <div class="archives-panel">
+    <div class="settings-header">
+      <span>Archives</span>
+      <button id="archives-close" class="settings-close">&times;</button>
+    </div>
+
+    <!-- Session list view -->
+    <div id="archives-list-view">
+      <div class="archives-list" id="archives-list">
+        <div class="empty-state" style="padding:24px;">No past sessions found.</div>
+      </div>
+    </div>
+
+    <!-- Session detail view -->
+    <div id="archives-detail-view" style="display:none;">
+      <div class="archives-detail-header">
+        <button id="archives-back" class="archives-back-btn">← Back</button>
+        <span class="archives-detail-title" id="archives-detail-title"></span>
+      </div>
+      <div class="archives-detail-tabs">
+        <button class="archives-tab active" data-tab="notes">Notes</button>
+        <button class="archives-tab" data-tab="transcript">Transcript</button>
+        <div class="archives-detail-actions">
+          <button id="archives-export" class="export-btn" title="Export current tab">Export</button>
+          <button id="archives-delete" class="archives-delete-btn" title="Delete session">Delete</button>
+        </div>
+      </div>
+      <div class="archives-detail-body" id="archives-detail-body">
+        <div class="empty-state">Loading...</div>
+      </div>
+      <!-- Delete confirmation -->
+      <div id="archives-delete-confirm" class="archives-delete-confirm" style="display:none;">
+        <div class="archives-delete-confirm-inner">
+          <p>Are you sure you want to delete this session? This cannot be undone.</p>
+          <div class="archives-delete-confirm-actions">
+            <button id="archives-delete-cancel" class="setup-btn-ghost">Cancel</button>
+            <button id="archives-delete-yes" class="archives-delete-yes-btn">Delete Session</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
