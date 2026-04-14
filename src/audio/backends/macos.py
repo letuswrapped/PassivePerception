@@ -33,11 +33,15 @@ class MacOSAudioBackend(AudioCaptureBackend):
         self._native_rate = target_rate
 
     def start(self, callback: Callable[[np.ndarray], None]) -> None:
-        device = self.find_loopback_device() or self._find_by_name(self._device_name)
+        # For BlackHole, try the loopback-specific finder first
+        if "blackhole" in self._device_name.lower():
+            device = self.find_loopback_device() or self._find_by_name(self._device_name)
+        else:
+            device = self._find_by_name(self._device_name)
         if device is None:
             raise RuntimeError(
-                "BlackHole not found. Install with: brew install blackhole-2ch\n"
-                "Then set up a Multi-Output Device in Audio MIDI Setup."
+                f"Audio device '{self._device_name}' not found.\n"
+                "Check System Settings → Sound → Input for available devices."
             )
 
         self._native_rate = int(device["sample_rate"])

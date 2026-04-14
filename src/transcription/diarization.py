@@ -1,9 +1,10 @@
 """
-Post-session speaker diarization using pyannote-audio.
+Post-session speaker diarization using simple-diarizer (ECAPA-TDNN).
 
 Runs ONCE after the session ends on the full concatenated audio.
-Executes in a subprocess so all PyTorch/pyannote memory is freed
-immediately when the worker process exits — no lingering in the main app.
+Fully local — no HuggingFace token or cloud API required.
+Executes in a subprocess so all memory is freed immediately when
+the worker process exits — no lingering in the main app.
 """
 
 from __future__ import annotations
@@ -42,27 +43,23 @@ def run_diarization(
     audio_path: Path,
     transcript_lines: list[TranscriptLine],
     speaker_labels: dict[str, str],
-    model_name: str = "pyannote/speaker-diarization-3.1",
     progress_cb: Callable[[str], None] | None = None,
-    min_speakers: int | None = None,
-    max_speakers: int | None = None,
+    threshold: float = 0.8,
+    **_kwargs,
 ) -> list[TranscriptLine]:
     """
-    Run speaker diarization in a subprocess, then apply the resulting
-    speaker segments back to transcript_lines.
+    Run speaker diarization via simple-diarizer (ECAPA-TDNN embeddings),
+    then apply the resulting speaker segments back to transcript_lines.
 
-    The subprocess approach ensures PyTorch/pyannote memory is released
-    by the OS the moment the worker exits — no lingering in the main app.
+    No HuggingFace token required. Models auto-download on first run.
+
+    The subprocess approach ensures all memory is released by the OS
+    the moment the worker exits — no lingering in the main app.
     """
     def _progress(msg: str) -> None:
         print(f"[diarization] {msg}", flush=True)
         if progress_cb:
             progress_cb(msg)
-
-    token = os.environ.get("HUGGINGFACE_TOKEN", "").strip()
-    if not token:
-        _progress("No HUGGINGFACE_TOKEN — skipping diarization, all lines labeled Speaker 1")
-        return transcript_lines
 
     # Write segments to a temp JSON file next to the audio
     segments_path = audio_path.with_suffix(".segments.json")
@@ -72,13 +69,7 @@ def run_diarization(
         sys.executable, "-m", "src.transcription.diarization_worker",
         "--audio", str(audio_path),
         "--out",   str(segments_path),
-        "--model", model_name,
-        "--token", token,
     ]
-    if min_speakers is not None:
-        cmd += ["--min-speakers", str(min_speakers)]
-    if max_speakers is not None:
-        cmd += ["--max-speakers", str(max_speakers)]
 
     try:
         # Stream the worker's stdout so progress messages appear in the terminal

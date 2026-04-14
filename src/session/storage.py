@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from src.notes.models import SessionNotes
 from src.transcription.diarization import TranscriptLine
+
+logger = logging.getLogger(__name__)
 
 
 def save_session(
@@ -20,6 +25,7 @@ def save_session(
     """
     Write transcript.md and notes.md to session_dir.
     Optionally delete all WAV files from tmp_dir.
+    Also exports to Obsidian vault if configured.
     Returns session_dir.
     """
     _write_transcript(session_dir / "transcript.md", transcript)
@@ -29,7 +35,181 @@ def save_session(
         for wav in tmp_dir.glob("*.wav"):
             wav.unlink(missing_ok=True)
 
+    # Obsidian auto-export
+    try:
+        _export_to_obsidian(session_dir.name, transcript, notes)
+    except Exception as exc:
+        logger.warning("Obsidian export failed: %s", exc)
+
     return session_dir
+
+
+def _export_to_obsidian(
+    session_name: str,
+    transcript: list[TranscriptLine],
+    notes: SessionNotes,
+) -> None:
+    """
+    Export session to Obsidian vault as a folder containing:
+      - Session Notes.md   (summary, plot points, open questions + backlinks)
+      - Transcript.md
+      - NPCs/<name>.md     (one file per NPC)
+      - Locations/<name>.md (one file per location)
+    """
+    config_path = Path(__file__).parent.parent.parent / "obsidian_config.json"
+    if not config_path.exists():
+        return
+    try:
+        config = json.loads(config_path.read_text())
+    except Exception:
+        return
+
+    vault_path = config.get("vault_path", "")
+    if not vault_path or not config.get("auto_export", True):
+        return
+
+    vault = Path(vault_path)
+    if not vault.exists():
+        logger.warning("Obsidian vault not found: %s", vault_path)
+        return
+
+    subfolder = config.get("subfolder", "D&D Sessions").strip()
+    base_dir = vault / subfolder if subfolder else vault
+    safe_name = session_name.replace("/", "-").replace("\\", "-")
+    session_dir = base_dir / safe_name
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    npc_names = [npc.name for npc in notes.npcs] if notes.npcs else []
+    location_names = [loc.name for loc in notes.locations] if notes.locations else []
+
+    # ── Session Notes.md ──────────────────────────────────────────────────
+    npc_links = ", ".join(f"[[{n}]]" for n in npc_names) if npc_names else "None yet"
+    loc_links = ", ".join(f"[[{n}]]" for n in location_names) if location_names else "None yet"
+
+    notes_parts = [
+        f"---",
+        f"type: session-notes",
+        f"date: {date_str}",
+        f"session: \"{safe_name}\"",
+        f"npcs: {json.dumps(npc_names)}",
+        f"locations: {json.dumps(location_names)}",
+        f"tags:",
+        f"  - dnd",
+        f"  - session",
+        f"---",
+        f"",
+        f"# {safe_name}",
+        f"",
+    ]
+
+    if notes.summary:
+        notes_parts.append(f"## Summary\n\n{notes.summary}\n")
+
+    # Link to NPCs and Locations
+    notes_parts.append(f"## NPCs\n\n{npc_links}\n")
+    notes_parts.append(f"## Locations\n\n{loc_links}\n")
+
+    if notes.plot_points:
+        notes_parts.append("## Plot Points\n")
+        for i, pp in enumerate(notes.plot_points, 1):
+            involved = ", ".join(f"[[{n}]]" for n in pp.npcs_involved) if pp.npcs_involved else ""
+            notes_parts.append(f"{i}. **{pp.summary}**")
+            if involved:
+                notes_parts.append(f"   *Involving: {involved}*")
+            if pp.context:
+                notes_parts.append(f"   {pp.context}")
+            notes_parts.append("")
+
+    if notes.open_questions:
+        notes_parts.append("## Open Questions\n")
+        for q in notes.open_questions:
+            notes_parts.append(f"- {q}")
+        notes_parts.append("")
+
+    notes_parts.append(f"\n---\n*See also: [[Transcript]]*")
+
+    _atomic_write(session_dir / "Session Notes.md", "\n".join(notes_parts))
+
+    # ── Transcript.md ─────────────────────────────────────────────────────
+    transcript_parts = [
+        f"---",
+        f"type: session-transcript",
+        f"date: {date_str}",
+        f"session: \"{safe_name}\"",
+        f"tags:",
+        f"  - dnd",
+        f"  - transcript",
+        f"---",
+        f"",
+        _write_transcript_str(transcript),
+    ]
+    _atomic_write(session_dir / "Transcript.md", "\n".join(transcript_parts))
+
+    # ── NPCs/ folder ──────────────────────────────────────────────────────
+    if notes.npcs:
+        npc_dir = session_dir / "NPCs"
+        npc_dir.mkdir(exist_ok=True)
+        for npc in notes.npcs:
+            npc_parts = [
+                f"---",
+                f"type: npc",
+                f"date: {date_str}",
+                f"session: \"{safe_name}\"",
+                f"relationship: \"{npc.relationship}\"",
+                f"tags:",
+                f"  - dnd",
+                f"  - npc",
+                f"  - {npc.relationship or 'unknown'}",
+                f"---",
+                f"",
+                f"# {npc.name}",
+                f"",
+            ]
+            if npc.relationship:
+                npc_parts.append(f"**Relationship:** {npc.relationship}\n")
+            if npc.description:
+                npc_parts.append(f"## Description\n\n{npc.description}\n")
+            if npc.first_seen:
+                npc_parts.append(f"**First seen:** {npc.first_seen}")
+            if npc.last_seen:
+                npc_parts.append(f"**Last seen:** {npc.last_seen}")
+            if npc.notes:
+                npc_parts.append(f"\n## Notes\n\n{npc.notes}\n")
+            npc_parts.append(f"\n---\n*Session: [[Session Notes]]*")
+
+            npc_filename = npc.name.replace("/", "-").replace("\\", "-")
+            _atomic_write(npc_dir / f"{npc_filename}.md", "\n".join(npc_parts))
+
+    # ── Locations/ folder ─────────────────────────────────────────────────
+    if notes.locations:
+        loc_dir = session_dir / "Locations"
+        loc_dir.mkdir(exist_ok=True)
+        for loc in notes.locations:
+            loc_parts = [
+                f"---",
+                f"type: location",
+                f"date: {date_str}",
+                f"session: \"{safe_name}\"",
+                f"tags:",
+                f"  - dnd",
+                f"  - location",
+                f"---",
+                f"",
+                f"# {loc.name}",
+                f"",
+            ]
+            if loc.description:
+                loc_parts.append(f"{loc.description}\n")
+            if loc.significance:
+                loc_parts.append(f"## Significance\n\n*{loc.significance}*\n")
+            loc_parts.append(f"\n---\n*Session: [[Session Notes]]*")
+
+            loc_filename = loc.name.replace("/", "-").replace("\\", "-")
+            _atomic_write(loc_dir / f"{loc_filename}.md", "\n".join(loc_parts))
+
+    logger.info("Obsidian export: %s (%d NPCs, %d locations)",
+                session_dir, len(notes.npcs), len(notes.locations))
 
 
 def _atomic_write(path: Path, content: str) -> None:

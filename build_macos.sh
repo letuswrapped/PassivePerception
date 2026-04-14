@@ -220,23 +220,12 @@ BHDIALOG
     fi
   fi
 
-  # ── HuggingFace token ────────────────────────────────────────────────────
-  ENV_FILE="$SUPPORT_DIR/.env"
-  if [ ! -f "$ENV_FILE" ] || ! grep -q "HUGGINGFACE_TOKEN=." "$ENV_FILE" 2>/dev/null; then
-    HF_TOKEN=$(ask_text "Speaker identification requires a free HuggingFace token.
-
-1. Create one at: huggingface.co/settings/tokens
-2. Accept the license at: huggingface.co/pyannote/speaker-diarization-3.1
-
-Paste your token below (or leave blank to skip):")
-
-    if [ -n "$HF_TOKEN" ]; then
-      echo "HUGGINGFACE_TOKEN=$HF_TOKEN" > "$ENV_FILE"
-      log "HF token saved"
-    else
-      echo "HUGGINGFACE_TOKEN=" > "$ENV_FILE"
-      log "HF token skipped"
-    fi
+  # ── stt CLI (speaker diarization via FluidAudio/CoreML) ───────────────────
+  if ! command -v stt &>/dev/null; then
+    log "Installing stt CLI (speaker diarization)..."
+    notify "Installing speaker diarization engine..."
+    brew tap jvsteiner/tap >> "$LOG_FILE" 2>&1
+    brew install stt >> "$LOG_FILE" 2>&1
   fi
 
   notify "Setup complete! Launching Passive Perception..."
@@ -253,12 +242,6 @@ eval "$(pyenv init -)" 2>/dev/null
 
 source "$VENV_DIR/bin/activate"
 
-# Symlink .env if it exists in support dir
-ENV_FILE="$SUPPORT_DIR/.env"
-if [ -f "$ENV_FILE" ] && [ ! -f "$APP_DIR/.env" ]; then
-  ln -sf "$ENV_FILE" "$APP_DIR/.env"
-fi
-
 # Create sessions dir in support directory
 mkdir -p "$SUPPORT_DIR/sessions"
 if [ ! -e "$APP_DIR/sessions" ]; then
@@ -267,10 +250,7 @@ fi
 
 cd "$APP_DIR"
 
-# Open browser after a short delay
-(sleep 3 && open "http://localhost:8000") &
-
-# Run the server (this blocks until the app is quit)
+# Run the app (opens native window, blocks until quit)
 python run.py >> "$LOG_FILE" 2>&1
 
 LAUNCHER

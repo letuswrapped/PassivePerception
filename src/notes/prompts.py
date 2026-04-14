@@ -32,7 +32,17 @@ Rules:
 - Do NOT invent details not in the transcript. If something is unclear, omit it.
 - If the same NPC appears with slight name variations, consolidate them into one entry using the most complete/consistent name.
 - Ignore meta-talk: rules questions, dice rolls, bathroom breaks, "wait what page is that on", etc.
-- Output ONLY valid JSON matching the schema. No explanation, no markdown fences.
+- Output ONLY valid JSON matching the schema below. No explanation, no markdown fences.
+- EVERY field is REQUIRED. You MUST include all 5 top-level keys, even if some are empty.
+
+JSON schema (follow this EXACTLY):
+{
+  "summary": "string (REQUIRED - 2-4 sentence narrative summary of the session)",
+  "npcs": [{"name": "string", "description": "string", "relationship": "string", "first_seen": "string", "last_seen": "string", "notes": "string"}],
+  "locations": [{"name": "string", "description": "string", "significance": "string"}],
+  "plot_points": [{"summary": "string", "npcs_involved": ["string"], "context": "string"}],
+  "open_questions": ["string"]
+}
 """
 
 
@@ -69,8 +79,12 @@ def build_messages(transcript: str, existing_notes_json: str = "", player_contex
             f"the transcript above. Do not remove NPCs, locations, or plot points "
             f"that were identified earlier:\n\n{existing_notes_json}"
         )
-    user_content += "\n\nExtract structured notes from this transcript."
+    user_content += (
+        "\n\nExtract structured notes from this transcript. "
+        "Start with the summary field first, then npcs, locations, plot_points, and open_questions. "
+        "ALL 5 fields are required in your JSON output."
+    )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_content},
     ]

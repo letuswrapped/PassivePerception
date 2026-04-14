@@ -78,6 +78,11 @@ class SessionManager:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def set_mic_device(self, device_name: str | None) -> None:
+        """Set or clear the microphone for dual-source capture."""
+        self._capture.set_mic_device(device_name)
+        logger.info("Mic device set: %s", device_name or "(none)")
+
     async def start(self, session_name: str | None = None) -> None:
         if self._state != SessionState.IDLE:
             return
@@ -138,8 +143,7 @@ class SessionManager:
             except asyncio.QueueEmpty:
                 break
 
-        # Final LLM pass before diarization
-        self._organizer.update_transcript(self._transcript_as_text())
+        # Stop the live LLM loop (full pass happens in _post_session after diarization)
         await self._organizer.stop()
 
         # Hand off to background post-session processing
@@ -148,13 +152,26 @@ class SessionManager:
 
     async def _post_session(self) -> None:
         """
-        Background task: diarize full session audio, save, cleanup.
+        Background task: diarize full session audio, run full LLM pass, save, cleanup.
         """
+        import gc
+
         loop = asyncio.get_event_loop()
         sample_rate = self._cfg["audio"]["sample_rate"]
         tmp_dir = Path(self._cfg["output"]["tmp_directory"])
 
         try:
+            # Free Whisper model memory — transcription is done
+            self._progress_message = "Freeing transcription model memory..."
+            self._transcriber = None
+            gc.collect()
+            try:
+                import mlx.core as mx
+                mx.metal.clear_cache()
+            except Exception:
+                pass
+            logger.info("Whisper model unloaded for post-session processing")
+
             # Step 1: Concatenate all audio chunks
             self._progress_message = "Concatenating session audio..."
             concat_path = tmp_dir / "session_full.wav"
@@ -166,12 +183,11 @@ class SessionManager:
                     lambda: concatenate_audio_chunks(valid_chunks, concat_path, sample_rate),
                 )
 
-                # Step 2: Run pyannote diarization on full audio
+                # Step 2: Run diarization on full audio
                 def _progress(msg: str) -> None:
                     self._progress_message = msg
 
                 diar_cfg = self._cfg.get("diarization", {})
-                # Pass a copy so diarization doesn't mutate the live list
                 transcript_snapshot = list(self._transcript)
                 updated_lines = await loop.run_in_executor(
                     None,
@@ -179,10 +195,8 @@ class SessionManager:
                         audio_path=concat_path,
                         transcript_lines=transcript_snapshot,
                         speaker_labels=self._speaker_labels,
-                        model_name=diar_cfg.get("model", "pyannote/speaker-diarization-3.1"),
                         progress_cb=_progress,
-                        min_speakers=diar_cfg.get("min_speakers"),
-                        max_speakers=diar_cfg.get("max_speakers"),
+                        threshold=diar_cfg.get("threshold", 0.8),
                     ),
                 )
                 self._transcript = updated_lines
@@ -190,7 +204,13 @@ class SessionManager:
             else:
                 logger.warning("No audio chunks found — skipping diarization")
 
-            # Step 3: Save session files
+            # Step 3: Run full chunked LLM pass over the entire transcript
+            self._progress_message = "Generating session notes (full transcript)..."
+            self._organizer.update_transcript(self._transcript_as_text())
+            await self._organizer.run_full_pass()
+            logger.info("Full LLM pass complete")
+
+            # Step 4: Save session files
             self._progress_message = "Saving session notes..."
             from src.session.storage import save_session
             save_session(

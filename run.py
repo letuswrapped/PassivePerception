@@ -35,10 +35,28 @@ def check_prerequisites() -> None:
         print("[warn] BlackHole audio driver not found.")
         print("       Run ./setup.sh or: brew install blackhole-2ch")
 
-    # HuggingFace token
-    if not os.environ.get("HUGGINGFACE_TOKEN", "").strip():
-        print("[warn] HUGGINGFACE_TOKEN not set — speaker diarization will be disabled.")
-        print("       Add it to a .env file in this directory.")
+    # Speaker diarization
+    try:
+        import simple_diarizer  # noqa: F401
+    except ImportError:
+        print("[warn] simple-diarizer not found — speaker diarization will be disabled.")
+        print("       Install with: pip install simple-diarizer")
+
+    # Ollama (LLM for note generation)
+    import shutil
+    if not shutil.which("ollama"):
+        print("[warn] Ollama not found — note generation will be disabled.")
+        print("       Install with: brew install ollama")
+    else:
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["ollama", "list"], capture_output=True, text=True, timeout=5
+            )
+            if "qwen3:4b" not in result.stdout:
+                print("[warn] qwen3:4b model not pulled. Run: ollama pull qwen3:4b")
+        except Exception:
+            print("[warn] Ollama not responding. Run: ollama serve")
 
 
 def start_server() -> None:
@@ -68,7 +86,7 @@ def _emergency_save() -> None:
     """Best-effort save of any in-progress session data on unexpected exit."""
     try:
         from src.app import _session
-        if _session is None or _session.state.value == "idle":
+        if _session is None or _session.state == "idle":
             return
 
         transcript = _session.get_transcript()
@@ -100,6 +118,7 @@ def main() -> None:
     # Register emergency save for unexpected exits
     atexit.register(_emergency_save)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # triggers atexit
+    signal.signal(signal.SIGINT,  lambda *_: sys.exit(0))  # Ctrl+C / force quit
 
     # Start server in background thread
     server_thread = threading.Thread(target=start_server, daemon=True)
@@ -121,7 +140,17 @@ def main() -> None:
         min_size=(900, 600),
         resizable=True,
         text_select=True,
+        frameless=True,
+        easy_drag=True,
     )
+
+    def on_closing():
+        """Save session before window closes."""
+        print("[info] Window closing — saving session...")
+        _emergency_save()
+        return True  # allow close
+
+    window.events.closing += on_closing
     webview.start(debug=False)
 
 

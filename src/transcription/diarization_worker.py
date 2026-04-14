@@ -1,110 +1,202 @@
 """
-Diarization worker — runs as a subprocess so all PyTorch/pyannote memory
-is released immediately when this process exits (no lingering in the parent).
+Diarization worker — tries FluidAudio Swift CLI first (Apple Neural Engine),
+falls back to simple-diarizer (CPU-based ECAPA-TDNN) on other platforms.
+
+No HuggingFace token or cloud API required for either path.
+Runs in a subprocess so all memory is freed when the worker exits.
 
 Usage:
     python -m src.transcription.diarization_worker \
         --audio path/to/session_full.wav \
         --out   path/to/segments.json \
-        --model pyannote/speaker-diarization-3.1 \
-        --token hf_xxxx
+        [--num-speakers 0]
+
+Output format:
+    {"segments": [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_00"}, ...]}
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import platform
+import shutil
+import subprocess
 import sys
-import wave
+import warnings
 from pathlib import Path
 
-import numpy as np
-import torch
+# Suppress noisy warnings
+warnings.filterwarnings("ignore", message="Module 'speechbrain.pretrained'")
+
+# Location of the Swift CLI binary (built from swift-diarizer/)
+_SWIFT_CLI_PATHS = [
+    Path(__file__).parent.parent.parent / "swift-diarizer" / ".build" / "release" / "DiarizeCLI",
+    Path(__file__).parent.parent.parent / "build" / "diarize-cli",
+    # Bundled in .app
+    Path(__file__).parent.parent.parent / "diarize-cli",
+]
 
 
-def _best_device() -> str:
-    # CPU only on Apple Silicon — MPS causes 5-6 GB shared-memory spikes.
-    # CUDA is fine because it has dedicated VRAM.
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
+def _find_swift_cli() -> Path | None:
+    """Find the FluidAudio Swift CLI binary."""
+    for p in _SWIFT_CLI_PATHS:
+        if p.exists() and p.is_file():
+            return p
+    # Also check PATH
+    which = shutil.which("diarize-cli")
+    if which:
+        return Path(which)
+    return None
 
 
-def _load_wav(wav_path: Path):
-    with wave.open(str(wav_path), "rb") as wf:
-        sr = wf.getframerate()
-        n_frames = wf.getnframes()
-        n_channels = wf.getnchannels()
-        raw = wf.readframes(n_frames)
-    pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-    if n_channels > 1:
-        pcm = pcm.reshape(-1, n_channels).mean(axis=1)
-    return torch.from_numpy(pcm).unsqueeze(0), sr
+def _run_swift_diarization(
+    audio_path: Path,
+    out_path: Path,
+    num_speakers: int,
+    log,
+) -> bool:
+    """Try FluidAudio Swift CLI. Returns True if successful."""
+    if platform.system() != "Darwin":
+        return False
+
+    cli = _find_swift_cli()
+    if cli is None:
+        log("FluidAudio Swift CLI not found — will use Python fallback")
+        return False
+
+    log(f"Using FluidAudio (Apple Neural Engine) via {cli.name}")
+
+    cmd = [str(cli), str(audio_path), str(out_path)]
+    if num_speakers > 0:
+        cmd += ["--num-speakers", str(num_speakers)]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                print(line, flush=True)
+
+        proc.wait(timeout=1800)
+
+        if proc.returncode == 0 and out_path.exists():
+            return True
+        else:
+            log(f"Swift CLI exited with code {proc.returncode}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        log("Swift CLI timed out after 30 minutes")
+        return False
+    except Exception as exc:
+        log(f"Swift CLI failed: {exc}")
+        return False
+
+
+def _run_python_diarization(
+    audio_path: Path,
+    out_path: Path,
+    num_speakers: int,
+    log,
+) -> None:
+    """Fallback: simple-diarizer (ECAPA-TDNN + spectral clustering)."""
+    import torch
+    # Trust the Silero VAD repo so it downloads without an interactive prompt
+    torch.hub._validate_not_a_forked_repo = lambda *a, **k: True  # noqa
+    torch.hub._check_repo_is_trusted = lambda *a, **k: None  # noqa
+
+    from simple_diarizer.diarizer import Diarizer
+
+    log("Loading ECAPA-TDNN speaker embedding model...")
+    diar = Diarizer(embed_model='ecapa')
+
+    n = num_speakers if num_speakers > 0 else None
+    log(f"Diarizing (speakers={'auto' if n is None else n})...")
+
+    try:
+        raw_segments = diar.diarize(
+            str(audio_path),
+            num_speakers=n,
+        )
+    except AssertionError as e:
+        if "speech" in str(e).lower() or "VAD" in str(e):
+            log("No speech detected in audio — skipping diarization")
+            out_path.write_text(json.dumps({"segments": []}))
+            return
+        raise
+
+    # Convert to our segment format
+    segments = []
+    for seg in raw_segments:
+        segments.append({
+            "start": round(float(seg["start"]), 3),
+            "end": round(float(seg["end"]), 3),
+            "speaker": f"SPEAKER_{int(seg['label']):02d}",
+        })
+
+    speakers = sorted(set(s["speaker"] for s in segments))
+    log(f"Found {len(speakers)} speaker(s): {speakers}")
+    log(f"Writing {len(segments)} segments to {out_path.name}")
+
+    out_path.write_text(json.dumps({"segments": segments}))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--audio",        required=True)
-    parser.add_argument("--out",          required=True)
-    parser.add_argument("--model",        default="pyannote/speaker-diarization-3.1")
-    parser.add_argument("--token",        required=True)
-    parser.add_argument("--min-speakers", type=int, default=None)
-    parser.add_argument("--max-speakers", type=int, default=None)
+    parser.add_argument("--audio", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--num-speakers", type=int, default=0,
+                        help="Expected number of speakers (0 = auto-detect)")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="(Legacy, ignored)")
     args = parser.parse_args()
 
     audio_path = Path(args.audio)
-    out_path   = Path(args.out)
-    device_str = _best_device()
+    out_path = Path(args.out)
 
     def log(msg: str) -> None:
         print(f"[diarization] {msg}", flush=True)
 
-    log(f"Loading pyannote pipeline on {device_str}...")
-    try:
-        from pyannote.audio import Pipeline
-        pipeline = Pipeline.from_pretrained(args.model, token=args.token)
-        pipeline.to(torch.device(device_str))
-    except Exception as exc:
-        log(f"Failed to load pipeline: {exc}")
-        out_path.write_text(json.dumps({"error": str(exc), "segments": []}))
+    if not audio_path.exists():
+        log(f"Audio file not found: {audio_path}")
+        out_path.write_text(json.dumps({"error": "Audio not found", "segments": []}))
         sys.exit(1)
 
     size_mb = audio_path.stat().st_size / 1024 / 1024
-    speaker_hint = ""
-    if args.min_speakers or args.max_speakers:
-        speaker_hint = f" (speakers: {args.min_speakers}–{args.max_speakers})"
-    log(f"Running diarization on {audio_path.name} ({size_mb:.1f} MB){speaker_hint}...")
+    log(f"Running diarization on {audio_path.name} ({size_mb:.1f} MB)...")
 
+    # Try FluidAudio Swift CLI first (macOS + Apple Neural Engine)
+    if _run_swift_diarization(audio_path, out_path, args.num_speakers, log):
+        log("Diarization complete (FluidAudio/Neural Engine)")
+        return
+
+    # Fallback: simple-diarizer (Python, CPU-based, cross-platform)
     try:
-        waveform, sample_rate = _load_wav(audio_path)
-        diar_kwargs = {}
-        if args.min_speakers is not None:
-            diar_kwargs["min_speakers"] = args.min_speakers
-        if args.max_speakers is not None:
-            diar_kwargs["max_speakers"] = args.max_speakers
-        diarize_output = pipeline({"waveform": waveform, "sample_rate": sample_rate}, **diar_kwargs)
-        annotation = diarize_output
-
-        segments = []
-        for turn, _, speaker in annotation.itertracks(yield_label=True):
-            segments.append({
-                "start":   round(turn.start, 3),
-                "end":     round(turn.end,   3),
-                "speaker": speaker,
-            })
-
-        speakers = list({s["speaker"] for s in segments})
-        log(f"Found {len(speakers)} speaker(s): {speakers}")
-        log(f"Writing {len(segments)} segments to {out_path.name}")
-
-        out_path.write_text(json.dumps({"segments": segments}))
-
+        log("Using simple-diarizer (CPU fallback)...")
+        _run_python_diarization(audio_path, out_path, args.num_speakers, log)
+        log("Diarization complete (simple-diarizer)")
+    except ImportError:
+        log("simple-diarizer not installed. Run: pip install simple-diarizer")
+        out_path.write_text(json.dumps({
+            "error": "No diarization backend available",
+            "segments": [],
+        }))
+        sys.exit(1)
     except Exception as exc:
         log(f"Diarization failed: {exc}")
-        out_path.write_text(json.dumps({"error": str(exc), "segments": []}))
+        out_path.write_text(json.dumps({
+            "error": str(exc),
+            "segments": [],
+        }))
         sys.exit(1)
-
-    # Process exits here — OS reclaims all PyTorch/pyannote memory immediately.
 
 
 if __name__ == "__main__":

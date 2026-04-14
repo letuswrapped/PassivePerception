@@ -99,31 +99,43 @@ else
   read -p "Press Enter once you've completed the Multi-Output Device setup..."
 fi
 
-# ── 6. MLX LLM model ────────────────────────────────────────────────────────
+# ── 6. Ollama + LLM model ───────────────────────────────────────────────────
 divider
-info "The LLM model will be downloaded automatically on first use."
-info "Model: mlx-community/Llama-3.2-3B-Instruct-4bit (~2 GB)"
-info "This requires Apple Silicon (M1/M2/M3/M4/M5)."
+info "Checking Ollama..."
+if ! command -v ollama &>/dev/null; then
+  info "Installing Ollama via Homebrew..."
+  brew install ollama
+fi
+info "Ollama found: $(ollama --version 2>/dev/null || echo 'installed')"
 
-# ── 7. HuggingFace token ─────────────────────────────────────────────────────
+# Start Ollama in the background if not already running
+if ! pgrep -x "ollama" &>/dev/null; then
+  info "Starting Ollama service..."
+  ollama serve &>/dev/null &
+  sleep 2
+fi
+
+info "Pulling Qwen3 4B model (~2.5 GB download)..."
+ollama pull qwen3:4b
+info "LLM model ready."
+
+# ── 7. FluidAudio Swift CLI (speaker diarization) ───────────────────────────
 divider
-info "HuggingFace token setup for speaker diarization..."
+info "Building FluidAudio diarization CLI (Apple Neural Engine)..."
 echo ""
-if [ -f ".env" ] && grep -q "HUGGINGFACE_TOKEN" .env; then
-  info "HuggingFace token already configured in .env"
+if [ -f "swift-diarizer/.build/release/DiarizeCLI" ]; then
+  info "DiarizeCLI already built."
 else
-  echo "  pyannote-audio requires a HuggingFace token to download the diarization model."
-  echo "  1. Create a token at: https://huggingface.co/settings/tokens (Read access)"
-  echo "  2. Accept the model license at: https://huggingface.co/pyannote/speaker-diarization-3.1"
-  echo ""
-  read -p "  Paste your HuggingFace token here: " HF_TOKEN
-  if [ -z "$HF_TOKEN" ]; then
-    warn "No token provided. Speaker diarization will be disabled until you add"
-    warn "HUGGINGFACE_TOKEN=your_token_here to a .env file in this directory."
-    echo "HUGGINGFACE_TOKEN=" > .env
+  if command -v swift &>/dev/null; then
+    (cd swift-diarizer && swift build -c release 2>&1)
+    if [ -f "swift-diarizer/.build/release/DiarizeCLI" ]; then
+      info "DiarizeCLI built — diarization models will auto-download on first use (~200 MB)"
+    else
+      warn "Swift build failed — will fall back to Python-based diarization (slower)"
+    fi
   else
-    echo "HUGGINGFACE_TOKEN=$HF_TOKEN" > .env
-    info "Token saved to .env"
+    warn "Swift compiler not found — will fall back to Python-based diarization"
+    warn "Install Xcode Command Line Tools: xcode-select --install"
   fi
 fi
 

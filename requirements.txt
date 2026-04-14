@@ -4,8 +4,8 @@ mlx-whisper>=0.4.0
 # Transcription — fallback (Windows / Intel Mac / no MLX)
 faster-whisper>=1.2.1
 
-# Speaker diarization (post-session)
-pyannote-audio>=4.0
+# Speaker diarization (post-session) — fully local, no token needed
+simple-diarizer>=0.0.13
 
 # Audio capture & processing
 sounddevice>=0.4.6
@@ -21,8 +21,8 @@ websockets>=12.0
 pydantic>=2.5
 pydantic-settings>=2.1
 
-# LLM — Apple Silicon Neural Engine (same MLX ecosystem as mlx-whisper)
-mlx-lm>=0.19
+# LLM — Ollama (local inference, runs alongside ollama serve)
+ollama>=0.4
 
 # Config & env
 pyyaml>=6.0

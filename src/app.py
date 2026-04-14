@@ -77,6 +77,23 @@ def _load_player_context() -> dict:
 
 _player_context = _load_player_context()
 
+# ── Mic device (persisted in-memory, applied to each new session) ────────
+_mic_device: str | None = None
+
+# ── Obsidian config (persisted to disk) ──────────────────────────────────
+_OBSIDIAN_CONFIG_PATH = Path(__file__).parent.parent / "obsidian_config.json"
+_obsidian_config: dict = {}
+
+def _load_obsidian_config() -> dict:
+    if _OBSIDIAN_CONFIG_PATH.exists():
+        try:
+            return json.loads(_OBSIDIAN_CONFIG_PATH.read_text())
+        except Exception:
+            pass
+    return {}
+
+_obsidian_config = _load_obsidian_config()
+
 app.mount(
     "/static",
     StaticFiles(directory=Path(__file__).parent / "ui" / "static"),
@@ -140,6 +157,60 @@ async def get_player_context():
     return _player_context
 
 
+# ── Obsidian routes ──────────────────────────────────────────────────────────
+
+@app.get("/settings/obsidian")
+async def get_obsidian_config():
+    return _obsidian_config
+
+@app.post("/settings/obsidian")
+async def set_obsidian_config(payload: dict):
+    global _obsidian_config
+    vault_path = payload.get("vault_path", "").strip()
+    subfolder = payload.get("subfolder", "D&D Sessions").strip()
+    auto_export = payload.get("auto_export", True)
+
+    # Validate vault path
+    if vault_path:
+        vault = Path(vault_path)
+        if not vault.exists() or not vault.is_dir():
+            return {"ok": False, "error": "Vault folder not found"}
+        obsidian_dir = vault / ".obsidian"
+        if not obsidian_dir.exists():
+            return {"ok": False, "error": "Not an Obsidian vault (no .obsidian folder)"}
+
+    _obsidian_config = {
+        "vault_path": vault_path,
+        "subfolder": subfolder,
+        "auto_export": auto_export,
+    }
+    _OBSIDIAN_CONFIG_PATH.write_text(json.dumps(_obsidian_config, indent=2))
+    return {"ok": True}
+
+@app.post("/settings/obsidian/disconnect")
+async def disconnect_obsidian():
+    global _obsidian_config
+    _obsidian_config = {}
+    if _OBSIDIAN_CONFIG_PATH.exists():
+        _OBSIDIAN_CONFIG_PATH.unlink()
+    return {"ok": True}
+
+@app.post("/settings/obsidian/browse")
+async def browse_obsidian_vault():
+    """Open a native folder picker and return the selected path."""
+    import subprocess
+    result = subprocess.run(
+        ["osascript", "-e",
+         'set theFolder to choose folder with prompt "Select your Obsidian vault folder"',
+         "-e", 'POSIX path of theFolder'],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return {"ok": False, "path": ""}
+    path = result.stdout.strip().rstrip("/")
+    return {"ok": True, "path": path}
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -151,6 +222,17 @@ async def index():
 @app.get("/devices")
 async def get_devices():
     return {"devices": list_input_devices()}
+
+
+@app.post("/settings/mic-device")
+async def set_mic_device(payload: dict):
+    """Set the microphone device for dual-source capture (local player's voice)."""
+    global _mic_device
+    device_name = payload.get("device", "").strip() or None
+    _mic_device = device_name
+    if _session is not None:
+        _session.set_mic_device(device_name)
+    return {"ok": True, "device": device_name}
 
 
 @app.get("/session/transcript_lines")
@@ -208,8 +290,8 @@ async def export_transcript():
     content = _write_transcript_str(transcript)
     return PlainTextResponse(
         content=content,
-        media_type="text/markdown",
-        headers={"Content-Disposition": "attachment; filename=transcript.md"},
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=transcript.txt"},
     )
 
 
@@ -225,8 +307,8 @@ async def export_notes():
     content = _write_notes_str(notes)
     return PlainTextResponse(
         content=content,
-        media_type="text/markdown",
-        headers={"Content-Disposition": "attachment; filename=notes.md"},
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=notes.txt"},
     )
 
 
@@ -241,6 +323,42 @@ async def session_status():
     }
 
 
+@app.get("/system/open-midi-setup")
+async def open_midi_setup():
+    """Open Audio MIDI Setup on macOS."""
+    import subprocess
+    subprocess.Popen(["open", "/Applications/Utilities/Audio MIDI Setup.app"])
+    return {"ok": True}
+
+
+@app.post("/settings/hf-token")
+async def save_hf_token(payload: dict):
+    """Save HuggingFace token to .env file."""
+    import os
+    token = payload.get("token", "").strip()
+    if not token:
+        return {"ok": False, "error": "No token provided"}
+
+    env_path = Path(".env")
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    # Replace or add the token line
+    found = False
+    for i, line in enumerate(lines):
+        if line.startswith("HUGGINGFACE_TOKEN"):
+            lines[i] = f"HUGGINGFACE_TOKEN={token}"
+            found = True
+            break
+    if not found:
+        lines.append(f"HUGGINGFACE_TOKEN={token}")
+
+    env_path.write_text("\n".join(lines) + "\n")
+    os.environ["HUGGINGFACE_TOKEN"] = token
+    return {"ok": True}
+
+
 @app.post("/session/start")
 async def session_start(body: StartSessionRequest = StartSessionRequest()):
     global _session
@@ -248,6 +366,10 @@ async def session_start(body: StartSessionRequest = StartSessionRequest()):
         return {"error": "Session already running"}
 
     _session = SessionManager(CONFIG, player_context=_player_context or None)
+
+    # Apply saved mic device so dual capture works from the start
+    if _mic_device:
+        _session.set_mic_device(_mic_device)
 
     async def on_transcript(line: TranscriptLine):
         await _broadcast_transcript(line)
@@ -310,6 +432,21 @@ async def get_session_transcript(session_id: str):
     if not path.exists():
         return {"error": "Transcript not found"}
     return {"transcript": path.read_text()}
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a saved session directory."""
+    import shutil
+    session_dir = Path(CONFIG["output"]["directory"]) / session_id
+    if not session_dir.exists() or not session_dir.is_dir():
+        return {"error": "Session not found"}
+    # Safety: only delete within the output directory
+    output_dir = Path(CONFIG["output"]["directory"]).resolve()
+    if not session_dir.resolve().is_relative_to(output_dir):
+        return {"error": "Invalid session path"}
+    shutil.rmtree(session_dir)
+    return {"ok": True}
 
 
 # ── WebSockets ────────────────────────────────────────────────────────────────
