@@ -11,6 +11,13 @@ VERSION="1.0.0"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
+ENTITLEMENTS="$BUILD_DIR/entitlements.plist"
+
+# Signing / notarization config — override via environment if you prefer.
+# Leave APPLE_DEVELOPER_ID empty to skip signing entirely (produces an
+# unsigned build for local testing).
+APPLE_DEVELOPER_ID="${APPLE_DEVELOPER_ID:-Developer ID Application: Colby Schenck (D9L2AS7SDJ)}"
+APPLE_NOTARY_PROFILE="${APPLE_NOTARY_PROFILE:-PassivePerception}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -257,6 +264,57 @@ LAUNCHER
 
 chmod +x "$APP_DIR/Contents/MacOS/launcher"
 
+# ── Entitlements ───────────────────────────────────────────────────────────
+# Hardened-runtime exceptions for Python (JIT, unsigned C extensions, pyenv
+# env vars) plus microphone access. Required for notarization to accept the
+# bundle while still allowing MLX/Whisper/Ollama to run inside the app.
+info "Writing entitlements.plist..."
+cat > "$ENTITLEMENTS" << 'ENTITLEMENTS_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>
+ENTITLEMENTS_EOF
+
+# ── Code signing ────────────────────────────────────────────────────────────
+if [ -n "$APPLE_DEVELOPER_ID" ]; then
+  info "Signing app bundle with: $APPLE_DEVELOPER_ID"
+
+  # Sign the launcher first (inside-out: children before parent)
+  codesign --force --timestamp --options runtime \
+    --entitlements "$ENTITLEMENTS" \
+    --sign "$APPLE_DEVELOPER_ID" \
+    "$APP_DIR/Contents/MacOS/launcher"
+
+  # Sign the .app bundle itself
+  codesign --force --timestamp --options runtime --deep \
+    --entitlements "$ENTITLEMENTS" \
+    --sign "$APPLE_DEVELOPER_ID" \
+    "$APP_DIR"
+
+  # Verify the signature is valid and satisfies Gatekeeper
+  info "Verifying signature..."
+  codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+
+  # spctl may exit non-zero before notarization is stapled — that's fine here
+  spctl --assess --type execute --verbose=2 "$APP_DIR" 2>&1 || \
+    warn "spctl assessment will pass after notarization + stapling."
+else
+  warn "APPLE_DEVELOPER_ID not set — building unsigned app (local testing only)."
+fi
+
 # ── Build DMG ───────────────────────────────────────────────────────────────
 info "Creating DMG..."
 
@@ -273,6 +331,33 @@ hdiutil create -volname "Passive Perception" \
   -ov -format UDZO \
   "$BUILD_DIR/$DMG_NAME" \
   -quiet
+
+# ── Sign + notarize + staple the DMG ───────────────────────────────────────
+if [ -n "$APPLE_DEVELOPER_ID" ]; then
+  info "Signing DMG..."
+  codesign --force --timestamp --sign "$APPLE_DEVELOPER_ID" "$BUILD_DIR/$DMG_NAME"
+
+  # Check that a notarization profile exists in the keychain before submitting
+  if xcrun notarytool history --keychain-profile "$APPLE_NOTARY_PROFILE" &>/dev/null; then
+    info "Submitting DMG to Apple for notarization (this can take 2–10 minutes)..."
+    if xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
+         --keychain-profile "$APPLE_NOTARY_PROFILE" \
+         --wait; then
+      info "Stapling notarization ticket to DMG..."
+      xcrun stapler staple "$BUILD_DIR/$DMG_NAME"
+      xcrun stapler validate "$BUILD_DIR/$DMG_NAME"
+
+      info "Final Gatekeeper check..."
+      spctl --assess --type open --context context:primary-signature -v "$BUILD_DIR/$DMG_NAME" 2>&1 || true
+    else
+      warn "Notarization failed — DMG is signed but not notarized."
+      warn "Check the log with: xcrun notarytool log <submission-id> --keychain-profile $APPLE_NOTARY_PROFILE"
+    fi
+  else
+    warn "No notary profile '$APPLE_NOTARY_PROFILE' in keychain — skipping notarization."
+    warn "Run: xcrun notarytool store-credentials $APPLE_NOTARY_PROFILE"
+  fi
+fi
 
 info "Done!"
 echo ""
