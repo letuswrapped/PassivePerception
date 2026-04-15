@@ -131,7 +131,17 @@ def main() -> None:
 
     print(f"[info] Server ready at {URL}")
 
-    # Open native app window
+    # Unified titlebar (Safari / Xcode look) — traffic lights float over the
+    # content, no gray separator bar. pywebview 6.x applies the required
+    # NSWindow flags (`titlebarAppearsTransparent`, `titleVisibility=hidden`,
+    # `NSFullSizeContentViewWindowMask`) only on the `frameless=True` code
+    # path — setting them after the window is laid out is a no-op because
+    # WKWebView's content view has already been positioned below the titlebar.
+    #
+    # Frameless also hides the traffic lights by default, so we re-show them
+    # after the window is displayed. `easy_drag=False` because the topbar CSS
+    # already declares a `-webkit-app-region: drag` region — enabling easy_drag
+    # would make the entire window draggable (confirmed-bad UX).
     window = webview.create_window(
         title="Passive Perception",
         url=URL,
@@ -141,8 +151,64 @@ def main() -> None:
         resizable=True,
         text_select=True,
         frameless=True,
-        easy_drag=True,
+        easy_drag=False,
     )
+
+    def _restore_traffic_lights():
+        try:
+            import AppKit
+            from PyObjCTools import AppHelper
+
+            def apply():
+                nswin = window.native
+                for btn in (
+                    AppKit.NSWindowCloseButton,
+                    AppKit.NSWindowMiniaturizeButton,
+                    AppKit.NSWindowZoomButton,
+                ):
+                    nswin.standardWindowButton_(btn).setHidden_(False)
+
+            AppHelper.callAfter(apply)
+        except Exception as exc:
+            print(f"[warn] Could not restore traffic lights: {exc}")
+
+    window.events.shown += _restore_traffic_lights
+
+    # ── Topbar-scoped window drag ─────────────────────────────────────────
+    # WKWebView eats all mouse events before they hit the NSWindow, so
+    # `setMovableByWindowBackground_` and `-webkit-app-region: drag` both
+    # no-op. pywebview's `easy_drag=True` subclasses WKWebView's mouseDown
+    # to drag the window, but unconditionally — the entire window becomes a
+    # drag surface, which breaks text selection and feels wrong.
+    #
+    # We patch `WebKitHost.mouseDown_` / `mouseDragged_` so drag only engages
+    # when the click *started* in the top 56px (the CSS topbar region). Uses
+    # `NSWindow.performWindowDragWithEvent:` (10.11+) — AppKit's own drag
+    # loop, so behavior matches native windows exactly. Single clicks (no
+    # drag motion) still forward normally, so buttons in the topbar keep
+    # working.
+    from webview.platforms.cocoa import BrowserView
+    _TOPBAR_HEIGHT = 56  # pixels; matches #topbar rendered height
+    _orig_mouseDown    = BrowserView.WebKitHost.mouseDown_
+    _orig_mouseDragged = BrowserView.WebKitHost.mouseDragged_
+
+    def _patched_mouseDown(self, event):
+        i = BrowserView.get_instance('webview', self)
+        if i is not None and i.frameless:
+            loc = event.locationInWindow()
+            bounds = self.bounds()
+            i._mousedown_in_topbar = (bounds.size.height - loc.y) <= _TOPBAR_HEIGHT
+        _orig_mouseDown(self, event)
+
+    def _patched_mouseDragged(self, event):
+        i = BrowserView.get_instance('webview', self)
+        if i is not None and getattr(i, '_mousedown_in_topbar', False):
+            self.window().performWindowDragWithEvent_(event)
+            return
+        _orig_mouseDragged(self, event)
+
+    BrowserView.WebKitHost.mouseDown_    = _patched_mouseDown
+    BrowserView.WebKitHost.mouseDragged_ = _patched_mouseDragged
 
     def on_closing():
         """Save session before window closes."""

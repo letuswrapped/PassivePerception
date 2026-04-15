@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Passive Perception"
 BUNDLE_ID="com.passiveperception.app"
-VERSION="1.1.0"
+VERSION="1.1.1"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
@@ -99,7 +99,14 @@ APP_DIR="$(cd "$(dirname "$0")/../Resources/app" && pwd)"
 SUPPORT_DIR="$HOME/Library/Application Support/Passive Perception"
 VENV_DIR="$SUPPORT_DIR/venv"
 LOG_FILE="$SUPPORT_DIR/launcher.log"
+VERSION_STAMP="$SUPPORT_DIR/.version"
 PYTHON_VERSION="3.11.9"
+
+# Read the current app version from our own Info.plist so upgrades can
+# detect a version change and reinstall Python deps. Fail soft to "unknown"
+# so a missing/unreadable plist doesn't wedge the launcher.
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' \
+  "$(dirname "$0")/../Info.plist" 2>/dev/null || echo unknown)"
 
 mkdir -p "$SUPPORT_DIR"
 
@@ -237,6 +244,33 @@ BHDIALOG
 
   notify "Setup complete! Launching Passive Perception..."
   log "Setup complete"
+  echo "$APP_VERSION" > "$VERSION_STAMP"
+fi
+
+# ── Upgrade path ─────────────────────────────────────────────────────────────
+# If the app version changed since last launch (or the stamp is missing from
+# a pre-1.1.1 install), reinstall Python deps against the current
+# requirements.txt. This is what was biting us on the 1.0 → 1.1 jump: the
+# venv existed so setup was skipped, but requirements had changed (pyannote
+# → ollama + simple-diarizer) and the backend failed to import.
+INSTALLED_VERSION="$(cat "$VERSION_STAMP" 2>/dev/null || echo none)"
+if [ "$INSTALLED_VERSION" != "$APP_VERSION" ]; then
+  log "Upgrade detected ($INSTALLED_VERSION → $APP_VERSION) — reinstalling Python deps"
+  notify "Updating Passive Perception to $APP_VERSION — this takes a minute..."
+  PROGRESS_PID=$(progress_dialog "Updating to version $APP_VERSION...\n\nInstalling new Python packages.")
+
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)" 2>/dev/null
+
+  source "$VENV_DIR/bin/activate"
+  pip install --upgrade pip --quiet >> "$LOG_FILE" 2>&1
+  pip install -r "$APP_DIR/requirements.txt" >> "$LOG_FILE" 2>&1
+  deactivate 2>/dev/null || true
+
+  kill_progress "$PROGRESS_PID"
+  echo "$APP_VERSION" > "$VERSION_STAMP"
+  log "Upgrade complete"
 fi
 
 # ── Launch the app ───────────────────────────────────────────────────────────

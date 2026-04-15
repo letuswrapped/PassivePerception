@@ -1039,3 +1039,4 @@ function showToast(msg, type = '') {
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => toast.className = '', 3500);
 }
+

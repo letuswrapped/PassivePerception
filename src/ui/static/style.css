@@ -93,20 +93,21 @@ html, body {
   overflow: hidden;
 }
 
-/* ── Top Bar (also serves as window drag region in frameless mode) ───────── */
+/* ── Top Bar ─────────────────────────────────────────────────────────────── */
+/* Acts as the macOS window titlebar: left padding clears the traffic lights,
+   `-webkit-app-region: drag` lets the user drag the window from empty space,
+   and interactive controls opt back out with `no-drag`. */
 #topbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 20px 10px 85px; /* left padding clears macOS traffic lights */
+  padding: 12px 20px 10px 85px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
   flex-wrap: wrap;
-  -webkit-app-region: drag;      /* makes this area draggable */
+  -webkit-app-region: drag;
 }
-
-/* Buttons/inputs inside topbar must remain clickable */
 #topbar button,
 #topbar input,
 #topbar select,
