@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Passive Perception"
 BUNDLE_ID="com.passiveperception.app"
-VERSION="1.1.1"
+VERSION="1.1.2"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
@@ -283,16 +283,16 @@ eval "$(pyenv init -)" 2>/dev/null
 
 source "$VENV_DIR/bin/activate"
 
-# Create sessions dir in support directory
-mkdir -p "$SUPPORT_DIR/sessions"
-if [ ! -e "$APP_DIR/sessions" ]; then
-  ln -sf "$SUPPORT_DIR/sessions" "$APP_DIR/sessions"
-fi
+# Run from a writable CWD. The config declares `./sessions` and `./tmp` as
+# relative paths, and the app bundle under /Applications is read-only on a
+# notarized install (writing `tmp/` there fails with EPERM). `config.yaml`
+# is loaded via `Path(__file__).parent.parent` so it's unaffected by CWD.
+mkdir -p "$SUPPORT_DIR/sessions" "$SUPPORT_DIR/tmp"
+cd "$SUPPORT_DIR"
 
-cd "$APP_DIR"
-
-# Run the app (opens native window, blocks until quit)
-python run.py >> "$LOG_FILE" 2>&1
+# Run the app (opens native window, blocks until quit). Absolute path is
+# required because CWD is $SUPPORT_DIR (writable) rather than $APP_DIR.
+python "$APP_DIR/run.py" >> "$LOG_FILE" 2>&1
 
 LAUNCHER
 
