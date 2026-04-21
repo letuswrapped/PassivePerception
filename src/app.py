@@ -200,16 +200,10 @@ async def disconnect_obsidian():
 
 @app.post("/settings/obsidian/browse")
 async def browse_obsidian_vault():
-    import subprocess
-    result = subprocess.run(
-        ["osascript", "-e",
-         'set theFolder to choose folder with prompt "Select your Obsidian vault folder"',
-         "-e", 'POSIX path of theFolder'],
-        capture_output=True, text=True, timeout=60,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    from src.platform_utils import pick_folder
+    path = pick_folder(prompt="Select your Obsidian vault folder")
+    if not path:
         return {"ok": False, "path": ""}
-    path = result.stdout.strip().rstrip("/")
     return {"ok": True, "path": path}
 
 
@@ -440,9 +434,11 @@ async def resume_session(session_id: str):
 
 @app.get("/system/open-midi-setup")
 async def open_midi_setup():
-    import subprocess
-    subprocess.Popen(["open", "/Applications/Utilities/Audio MIDI Setup.app"])
-    return {"ok": True}
+    """Open the OS audio-settings UI. On macOS: Audio MIDI Setup.app.
+    On Windows: the ms-settings:sound page."""
+    from src.platform_utils import open_audio_settings
+    ok = open_audio_settings()
+    return {"ok": ok}
 
 
 # ── Session lifecycle ────────────────────────────────────────────────────────

@@ -16,10 +16,10 @@ from typing import Optional
 
 from dotenv import load_dotenv, set_key
 
+from src.platform_utils import ensure_app_support_dir
 
-_APP_SUPPORT_DIR = Path(os.environ.get("PP_SUPPORT_DIR") or
-                        Path.home() / "Library" / "Application Support" / "Passive Perception")
-_APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+_APP_SUPPORT_DIR = ensure_app_support_dir()
 _ENV_PATH = _APP_SUPPORT_DIR / ".env"
 
 

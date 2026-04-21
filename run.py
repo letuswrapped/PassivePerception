@@ -116,20 +116,62 @@ def main() -> None:
 
     print(f"[info] Server ready at {URL}")
 
-    # Unified titlebar (Safari / Xcode look) — traffic lights float over the
-    # content, no gray separator bar. pywebview 6.x applies the required
-    # NSWindow flags (`titlebarAppearsTransparent`, `titleVisibility=hidden`,
-    # `NSFullSizeContentViewWindowMask`) only on the `frameless=True` code
-    # path — setting them after the window is laid out is a no-op because
-    # WKWebView's content view has already been positioned below the titlebar.
-    #
-    # Frameless also hides the traffic lights by default, so we re-show them
-    # after the window is displayed. `easy_drag=False` because the topbar CSS
-    # already declares a `-webkit-app-region: drag` region — enabling easy_drag
-    # would make the entire window draggable (confirmed-bad UX).
+    # Window creation splits by platform. macOS path is the original Cocoa
+    # frameless + mouseDown monkey-patch + traffic-lights restore — totally
+    # unchanged from prior releases. Windows gets a plain framed window for
+    # Phase 0 of the port (frameless polish lands in Phase 1).
+    if sys.platform == "darwin":
+        window = _create_macos_window(URL)
+    else:
+        window = _create_default_window(URL)
+
+    def on_closing():
+        """Save session before window closes."""
+        print("[info] Window closing — saving session...")
+        _emergency_save()
+        return True  # allow close
+
+    window.events.closing += on_closing
+    webview.start(debug=False)
+
+
+def _create_default_window(url: str):
+    """
+    Plain framed window for Windows / Linux dev. Phase 0 of the Windows
+    port — Phase 1 will replace this with a frameless window + custom HTML
+    topbar + pywebview-drag-region on Windows.
+    """
+    return webview.create_window(
+        title="Passive Perception",
+        url=url,
+        width=1280,
+        height=800,
+        min_size=(900, 600),
+        resizable=True,
+        text_select=True,
+    )
+
+
+def _create_macos_window(url: str):
+    """
+    macOS unified-titlebar window — frameless=True + traffic-lights restored
+    + topbar-scoped drag patch. Preserves exact v2.0.1 behavior.
+
+    Unified titlebar (Safari / Xcode look) — traffic lights float over the
+    content, no gray separator bar. pywebview 6.x applies the required
+    NSWindow flags (`titlebarAppearsTransparent`, `titleVisibility=hidden`,
+    `NSFullSizeContentViewWindowMask`) only on the `frameless=True` code
+    path — setting them after the window is laid out is a no-op because
+    WKWebView's content view has already been positioned below the titlebar.
+
+    Frameless also hides the traffic lights by default, so we re-show them
+    after the window is displayed. `easy_drag=False` because the topbar CSS
+    already declares a `-webkit-app-region: drag` region — enabling easy_drag
+    would make the entire window draggable (confirmed-bad UX).
+    """
     window = webview.create_window(
         title="Passive Perception",
-        url=URL,
+        url=url,
         width=1280,
         height=800,
         min_size=(900, 600),
@@ -195,14 +237,7 @@ def main() -> None:
     BrowserView.WebKitHost.mouseDown_    = _patched_mouseDown
     BrowserView.WebKitHost.mouseDragged_ = _patched_mouseDragged
 
-    def on_closing():
-        """Save session before window closes."""
-        print("[info] Window closing — saving session...")
-        _emergency_save()
-        return True  # allow close
-
-    window.events.closing += on_closing
-    webview.start(debug=False)
+    return window
 
 
 if __name__ == "__main__":

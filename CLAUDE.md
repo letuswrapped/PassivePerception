@@ -2,6 +2,10 @@
 
 Cloud-backed D&D session scribe for macOS. Captures Discord audio via BlackHole, transcribes + diarizes via Deepgram Nova-3, extracts structured notes via Google Gemini 2.5 Flash, and auto-exports to an Obsidian vault. A persistent per-campaign roster (PCs, NPCs, locations, plot threads) biases both Deepgram (fantasy-name recognition) and Gemini (entity continuity + player perspective) so each session builds on the last.
 
+## You are on the `windows` branch
+
+The macOS build lives on `main` and is frozen at its latest release — do **not** pull Windows changes back to main without explicit user approval. Windows work is additive: `src/platform_utils.py`, `src/audio/backends/windows.py`, and `sys.platform`-guarded branches in `run.py` / `src/cloud_config.py` / `src/campaign/storage.py` / `src/app.py`. macOS behavior on this branch must remain bit-identical to the main branch — if you touch shared code, prove with a smoke test (import + route count + path resolution) that macOS output hasn't changed. See README's "Windows (alpha)" section for the Phase-0 scope and known gaps.
+
 ## Session start
 
 1. Read the latest note in `~/Documents/Obsidian/PassivePerception/sessions/` — it'll have the most recent decisions, tech debt, and follow-ups.

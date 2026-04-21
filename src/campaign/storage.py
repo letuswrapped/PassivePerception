@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -30,20 +29,25 @@ from src.campaign.models import (
     CampaignState,
 )
 from src.notes.models import SessionNotes
+from src.platform_utils import app_support_dir, obsidian_vault_candidates
 
 logger = logging.getLogger(__name__)
 
-_APP_SUPPORT_DIR = Path(os.environ.get("PP_SUPPORT_DIR") or
-                        Path.home() / "Library" / "Application Support" / "Passive Perception")
-_OBSIDIAN_CAMPAIGN_DIR = Path.home() / "Documents" / "Obsidian" / "PassivePerception" / "campaigns"
-
 
 def _campaigns_dir() -> Path:
-    """Prefer the Obsidian vault location if it exists; otherwise Application Support."""
-    if _OBSIDIAN_CAMPAIGN_DIR.parent.exists():
-        _OBSIDIAN_CAMPAIGN_DIR.mkdir(parents=True, exist_ok=True)
-        return _OBSIDIAN_CAMPAIGN_DIR
-    fallback = _APP_SUPPORT_DIR / "campaigns"
+    """
+    Prefer an Obsidian-vault location (so campaigns sync with the user's
+    other notes via iCloud/OneDrive/Obsidian Sync). Falls back to the app
+    support dir when no vault is present.
+
+    On Windows, the vault may live under OneDrive-redirected Documents —
+    `obsidian_vault_candidates()` probes both paths.
+    """
+    for vault_root in obsidian_vault_candidates():
+        pp_dir = vault_root / "PassivePerception" / "campaigns"
+        pp_dir.mkdir(parents=True, exist_ok=True)
+        return pp_dir
+    fallback = app_support_dir() / "campaigns"
     fallback.mkdir(parents=True, exist_ok=True)
     return fallback
 

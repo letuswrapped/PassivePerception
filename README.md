@@ -22,9 +22,10 @@ All of this — the roster, the brief, your character's perspective — is injec
 
 ## Requirements
 
-- **macOS** (Apple Silicon recommended)
-- **Python 3.11** (the setup script installs this via pyenv)
-- **Homebrew** ([install here](https://brew.sh))
+- **macOS** (Apple Silicon recommended) — shipped as a signed DMG
+- **Windows 10/11** — alpha, run-from-source only (see the _Windows (alpha)_ section below)
+- **Python 3.11** (the setup script installs this via pyenv on macOS)
+- **Homebrew** on macOS ([install here](https://brew.sh))
 - A **[Deepgram](https://console.deepgram.com/)** API key — $200 of free credit, no card required
 - A **[Google Gemini](https://aistudio.google.com/apikey)** API key — generous free tier works
 
@@ -147,6 +148,48 @@ Audio and transcripts are sent to Deepgram and Gemini over HTTPS and are *not* r
 - Gemini: paid-tier API calls are not used to train their models
 
 Neither provider retains audio after processing by default on these tiers. Sessions are stored locally in `./sessions/` and optionally mirrored to your Obsidian vault — nothing else leaves your machine.
+
+## Windows (alpha)
+
+A Windows variant lives on the `windows` branch — independent from macOS `main`, which remains the authoritative shipped version. This is Phase 0: run from source, no installer, unsigned. Known missing: custom window chrome, named-mutex single-instance, WASAPI device-change handling, installer + signing.
+
+### What's already working
+
+- **WASAPI loopback audio capture** via the `soundcard` library. No virtual audio driver (no BlackHole equivalent needed) — Windows exposes system audio as a first-party API. Captures the full output mix, which includes Discord by default.
+- **Platform-aware paths** — API keys live at `%APPDATA%\Passive Perception\.env`, local session artifacts at `%APPDATA%\Passive Perception\sessions\`.
+- **Platform-aware folder picker** — `tkinter.filedialog` replaces the macOS `osascript` dialog for the Obsidian vault browse.
+- **Platform-aware audio settings button** — opens `ms-settings:sound` instead of macOS Audio MIDI Setup.
+- **Obsidian vault auto-detection** probes both `~/Documents/Obsidian/` and `~/OneDrive/Documents/Obsidian/` (OneDrive-redirected Documents is common on Windows).
+- **Cross-platform campaign sync** — the campaign roster JSON lives inside the Obsidian vault, so if the vault is on iCloud / OneDrive / Obsidian Sync, campaigns sync between macOS and Windows automatically.
+
+### Try it (Windows 10/11)
+
+```powershell
+git clone https://github.com/letuswrapped/PassivePerception.git
+cd PassivePerception
+git checkout windows
+
+# Python 3.11 required. Create venv:
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Put API keys in %APPDATA%\Passive Perception\.env:
+#   DEEPGRAM_API_KEY=...
+#   GEMINI_API_KEY=...
+
+python run.py
+```
+
+The app opens in a plain framed window (Phase 0 — native window chrome, no custom topbar). Walk through onboarding, create a campaign, hit Record. Stop when done → label speakers → notes appear.
+
+### Known limitations of Phase 0
+
+- Window chrome is default Windows framed, not the macOS-style unified titlebar.
+- No Aero Snap or double-click-to-maximize testing yet.
+- Launching the app twice spawns two instances (no named-mutex yet).
+- If you change your Windows output device mid-session (plug in headphones), capture continues on the old device until you restart.
+- SmartScreen will show an "Unknown Publisher" warning the first time you run `python run.py` — click through; signing lands in a later phase.
 
 ## License
 
