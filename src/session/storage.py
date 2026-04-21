@@ -9,10 +9,96 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from src.notes.models import SessionNotes
-from src.transcription.diarization import TranscriptLine
+from src.notes.models import Pass1Result, SessionNotes
+from src.transcription import TranscriptLine
 
 logger = logging.getLogger(__name__)
+
+
+# ── Pass 1 artifact helpers ──────────────────────────────────────────────────
+
+
+PASS1_FILE = "pass1.json"
+TRANSCRIPT_JSON_FILE = "transcript.json"   # structured copy used when resuming
+NOTES_FILE = "notes.md"
+
+
+def write_transcript_only(session_dir: Path, transcript: list[TranscriptLine]) -> None:
+    """
+    Write transcript.md (markdown for humans) + transcript.json (structured,
+    for resume) at the end of Pass 1 — so the user always has raw output even
+    if they abandon labeling.
+    """
+    session_dir.mkdir(parents=True, exist_ok=True)
+    _write_transcript(session_dir / "transcript.md", transcript)
+    _atomic_write(
+        session_dir / TRANSCRIPT_JSON_FILE,
+        json.dumps([
+            {
+                "start": ln.start,
+                "end": ln.end,
+                "speaker_id": ln.speaker_id,
+                "speaker_label": ln.speaker_label,
+                "text": ln.text,
+            }
+            for ln in transcript
+        ], indent=2),
+    )
+
+
+def read_transcript_json(session_dir: Path) -> list[TranscriptLine]:
+    path = session_dir / TRANSCRIPT_JSON_FILE
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return []
+    return [
+        TranscriptLine(
+            start=d.get("start", 0.0),
+            end=d.get("end", 0.0),
+            speaker_id=d.get("speaker_id", "SPEAKER_00"),
+            speaker_label=d.get("speaker_label", "Speaker 1"),
+            text=d.get("text", ""),
+        )
+        for d in data
+    ]
+
+
+def write_pass1_json(session_dir: Path, pass1: Pass1Result) -> None:
+    session_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write(session_dir / PASS1_FILE, pass1.model_dump_json(indent=2))
+
+
+def read_pass1_json(session_dir: Path) -> Pass1Result | None:
+    path = session_dir / PASS1_FILE
+    if not path.exists():
+        return None
+    try:
+        return Pass1Result.model_validate_json(path.read_text())
+    except Exception as exc:
+        logger.warning("Failed to read %s: %s", path, exc)
+        return None
+
+
+def is_resumable(session_dir: Path) -> bool:
+    """A session is resumable if Pass 1 finished but Pass 2 never wrote notes.md."""
+    return (
+        session_dir.is_dir()
+        and (session_dir / PASS1_FILE).exists()
+        and (session_dir / TRANSCRIPT_JSON_FILE).exists()
+        and not (session_dir / NOTES_FILE).exists()
+    )
+
+
+def list_resumable_sessions(output_dir: Path) -> list[Path]:
+    if not output_dir.exists():
+        return []
+    return [p for p in sorted(output_dir.iterdir()) if p.is_dir() and is_resumable(p)]
+
+
+# ── Pass 2 finalizer — produces notes.md + Obsidian export ───────────────────
 
 
 def save_session(
@@ -23,13 +109,13 @@ def save_session(
     tmp_dir: Path | None = None,
 ) -> Path:
     """
-    Write transcript.md and notes.md to session_dir.
-    Optionally delete all WAV files from tmp_dir.
-    Also exports to Obsidian vault if configured.
+    Write transcript.md and notes.md to session_dir (re-writes transcript.md
+    in case labels changed between Pass 1 and Pass 2). Optionally delete all
+    WAV files from tmp_dir. Also exports to Obsidian vault if configured.
     Returns session_dir.
     """
     _write_transcript(session_dir / "transcript.md", transcript)
-    _write_notes(session_dir / "notes.md", notes)
+    _write_notes(session_dir / NOTES_FILE, notes)
 
     if auto_delete_audio and tmp_dir and tmp_dir.exists():
         for wav in tmp_dir.glob("*.wav"):

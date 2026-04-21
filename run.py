@@ -33,30 +33,15 @@ def check_prerequisites() -> None:
         blackhole = False
     if not blackhole:
         print("[warn] BlackHole audio driver not found.")
-        print("       Run ./setup.sh or: brew install blackhole-2ch")
+        print("       Install with: brew install blackhole-2ch")
 
-    # Speaker diarization
-    try:
-        import simple_diarizer  # noqa: F401
-    except ImportError:
-        print("[warn] simple-diarizer not found — speaker diarization will be disabled.")
-        print("       Install with: pip install simple-diarizer")
-
-    # Ollama (LLM for note generation)
-    import shutil
-    if not shutil.which("ollama"):
-        print("[warn] Ollama not found — note generation will be disabled.")
-        print("       Install with: brew install ollama")
-    else:
-        import subprocess
-        try:
-            result = subprocess.run(
-                ["ollama", "list"], capture_output=True, text=True, timeout=5
-            )
-            if "qwen3:4b" not in result.stdout:
-                print("[warn] qwen3:4b model not pulled. Run: ollama pull qwen3:4b")
-        except Exception:
-            print("[warn] Ollama not responding. Run: ollama serve")
+    # Cloud API keys (Deepgram + Gemini) — loaded from Application Support/.env
+    from src import cloud_config
+    cloud_config.load_keys()
+    status = cloud_config.status()
+    for provider, ok in status.items():
+        if not ok:
+            print(f"[warn] {provider.capitalize()} API key not set — configure it in Settings → API Keys.")
 
 
 def start_server() -> None:

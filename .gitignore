@@ -9,15 +9,12 @@ build/
 
 # Environment & secrets
 .env
-player_context.json
 obsidian_config.json
 
-# Auto-downloaded ML model weights
+# Obsolete from the pre-cloud era — kept so old working dirs clean up transparently
+player_context.json
 pretrained_models/
-
-# Swift build artifacts (source is committed, build output is not)
-swift-diarizer/.build/
-swift-diarizer/.swiftpm/
+swift-diarizer/
 
 # macOS
 .DS_Store

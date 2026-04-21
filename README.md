@@ -1,136 +1,152 @@
 # Passive Perception
 
-A local macOS app that listens to your D&D sessions, transcribes the conversation with speaker identification, and automatically organizes everything into structured campaign notes — NPCs, locations, plot points, and open questions.
-
-All processing happens on your machine. No cloud APIs, no subscriptions, no account tokens. Audio is deleted after transcription; only your notes persist.
+A macOS app that listens to your D&D sessions, transcribes the conversation with speaker identification, and writes campaign notes that are biased toward *your* character — what *you* experienced, what *your* goals are, what clues relate to *your* backstory.
 
 ![Passive Perception Icon](src/ui/static/icon.svg)
 
 ## What It Does
 
-1. **Captures audio** from Discord (or any app) via the BlackHole virtual audio driver
-2. **Transcribes speech** using Whisper (via MLX on Apple Silicon's Neural Engine)
-3. **Identifies speakers** post-session using FluidAudio — fully local, no HuggingFace account required
-4. **Generates structured notes** with a local LLM (Ollama + `qwen3:4b`) — NPCs, locations, plot points, open questions
-5. **Saves everything** as clean markdown and auto-exports to your Obsidian vault if configured
+1. **Captures audio** from Discord via the BlackHole virtual audio driver.
+2. **Transcribes + diarizes** the full session through **Deepgram Nova-3**, with your campaign roster fed in as `keyterm` bias so fantasy proper nouns come out correct.
+3. **Identifies speakers** with a post-session Gemini pass that writes a one-line summary per speaker — you label them once in the UI (pre-filled with the best guess from your party roster) and the rest of the pipeline takes over.
+4. **Classifies every utterance** as either in-character play or table-talk (rules lookups, off-topic chatter). Table-talk is dimmed in the transcript and *excluded* from the notes pass so your summary isn't polluted by the pizza order debate.
+5. **Writes structured notes** with **Google Gemini 2.5 Flash** — session summary, NPCs, locations, plot points, open questions — all phrased in the second person, weighted toward what *your* character would care about.
+6. **Merges back into a persistent campaign file**. New NPCs and locations append to your roster, plot points become ongoing threads, open questions become unresolved hooks. Every session builds on the last.
+7. **Auto-exports** the finished notes to your Obsidian vault if configured.
+
+## The load-bearing idea: a persistent campaign roster
+
+A campaign file holds your character (race/class/subclass/backstory/goals), your party, the NPCs and locations you've encountered, and a free-form "what I care about" perspective field. Before each session you add a pre-session brief ("tonight we confront Xanathar — I want to find out what he knows about my brother").
+
+All of this — the roster, the brief, your character's perspective — is injected into Gemini's system prompt every time it processes the transcript. That's what makes the notes intelligent across sessions instead of treating every recording as a blank slate.
 
 ## Requirements
 
-- **macOS** with **Apple Silicon** (M1/M2/M3/M4/M5)
-- **16 GB RAM** recommended
-- **Python 3.11** (the setup script handles this via pyenv)
+- **macOS** (Apple Silicon recommended)
+- **Python 3.11** (the setup script installs this via pyenv)
 - **Homebrew** ([install here](https://brew.sh))
+- A **[Deepgram](https://console.deepgram.com/)** API key — $200 of free credit, no card required
+- A **[Google Gemini](https://aistudio.google.com/apikey)** API key — generous free tier works
 
-No cloud accounts or API tokens needed.
+No cloud subscription on our side — you bring your own API keys so you control the billing. Every call is sent with `mip_opt_out=true` to Deepgram and Gemini's paid-tier no-training guarantee kicks in once you enable billing.
 
 ## Install
 
-1. Download **PassivePerception-1.1.3.dmg** from the [latest release](https://github.com/letuswrapped/PassivePerception/releases/latest)
-2. Open the DMG and drag **Passive Perception** to your Applications folder
-3. Launch it — the app is signed and notarized, so macOS will open it without warnings
-4. On first launch, the app self-heals any missing dependencies (ffmpeg, Ollama, the `qwen3:4b` model)
+1. Download the latest DMG from [Releases](https://github.com/letuswrapped/PassivePerception/releases/latest)
+2. Drag **Passive Perception** to Applications and launch it
+3. Walk through onboarding: enter both API keys → set up BlackHole / Multi-Output Device → create your first campaign (name + character) → done
+4. You're on the home screen. Write a pre-session brief, hit **Record**, play your game
 
 ## Quick Start (from source)
 
-If you prefer to run from source instead of the .app:
-
 ```bash
-# Clone the repo
 git clone https://github.com/letuswrapped/PassivePerception.git
 cd PassivePerception
-
-# Run the setup script (installs Python 3.11, dependencies, BlackHole, Ollama, etc.)
-chmod +x setup.sh
-./setup.sh
-
-# Start the app
+./setup.sh                          # Python 3.11 + venv + deps + BlackHole
 source .venv/bin/activate
-python run.py
+python run.py                       # opens the native window
 ```
 
-The app opens in a native frameless macOS window.
+Keys can be entered through Settings → API Keys in the app, or placed manually in `~/Library/Application Support/Passive Perception/.env`:
+
+```
+DEEPGRAM_API_KEY=...
+GEMINI_API_KEY=...
+```
 
 ## Audio Setup
 
-Passive Perception captures audio through **BlackHole 2ch**, a virtual audio driver. The setup script installs it, but you need to create a Multi-Output Device so you can hear your Discord call AND have the app capture it:
+To capture Discord audio, create a **Multi-Output Device** so you can hear the call *and* have the app see it:
 
 1. Open **Audio MIDI Setup** (Applications > Utilities)
-2. Click **+** at bottom-left, select **Create Multi-Output Device**
+2. Click **+** at the bottom-left → **Create Multi-Output Device**
 3. Check both your **headphones/speakers** and **BlackHole 2ch**
-4. Right-click the new device, select **Use This Device For Sound Output**
-5. In Discord: Settings > Voice & Video > Output Device > **Multi-Output Device**
+4. Right-click the new device → **Use This Device For Sound Output**
+5. In Discord: Settings → Voice & Video → Output Device → **Multi-Output Device**
 
-## How to Use
+The onboarding flow has a button that opens Audio MIDI Setup for you.
 
-1. Join your Discord session as usual
-2. Open Passive Perception and click **Begin Session**
-3. The transcript appears in real-time on the left panel; lightweight note passes update the right panel periodically
-4. Click **Stop** when your session ends — the app runs full diarization and a chunked LLM pass over the entire transcript, then saves final notes
-5. Transcript and notes are written as markdown and auto-exported to Obsidian if configured
+## How a session runs
 
-### Player Setup
+1. **Home** — pick your campaign, fill in tonight's pre-session brief, hit **Record**.
+2. **Live** — the app captures silently. No live transcript (you're playing, not reading). Your roster is shown in the sidebar so you can see exactly what context is feeding the AI. Notes panel refreshes every ~15 minutes with a rough preview.
+3. **Stop** — Deepgram transcribes the full session with diarization + keyterm bias. Gemini runs **Pass 1** to summarize each speaker and classify every utterance. Takes ~20 seconds.
+4. **Label speakers** — one card per speaker with a one-line summary, sample quotes, and a pre-filled guess from your roster. You type names (or hit **Skip** to use "Speaker 1/2/3") and click **Finalize**.
+5. **Notes** — Gemini's **Pass 2** runs over the *labeled + in-character-only* transcript. You get summary, NPCs, locations, plot points, open questions.
+6. **Campaign merge** — new entities append to your roster, the summary becomes the "last time on…" recap for next session. Obsidian export fires if configured.
 
-On first launch, you can enter your player name, character details, and backstory. This helps the AI identify you in the transcript and generate more relevant notes.
-
-### Obsidian Export
-
-Drop an `obsidian_config.json` next to the app pointing at your vault and each session auto-exports on Stop. If the file is missing or invalid, export is silently skipped — nothing else breaks.
+If you quit mid-labeling, the next launch offers a **Resume labeling** banner — Pass 1 artifacts are persisted to disk, nothing is lost.
 
 ## Configuration
 
-Edit `config.yaml` to customize:
+`config.yaml` for non-secret runtime behaviour:
 
 ```yaml
 audio:
-  device: "BlackHole 2ch"    # auto-detected if this exact name is found
-  chunk_duration: 8          # seconds per audio chunk
-
-transcription:
-  model: "small.en"          # tiny.en, base.en, small.en, medium.en, large-v3
-
-diarization:
-  threshold: 0.8             # clustering sensitivity (lower = more speakers)
-
+  device: "BlackHole 2ch"
+  chunk_duration: 30          # seconds per on-disk WAV chunk
 notes:
-  llm_model: "qwen3:4b"      # Ollama model
-  update_interval: 300       # seconds between live note passes
+  update_interval: 900        # seconds between mid-session notes refreshes (default 15 min)
+output:
+  directory: "./sessions"
+  auto_delete_audio: true
 ```
+
+API keys live in `~/Library/Application Support/Passive Perception/.env` (never in the repo, never in `config.yaml`).
 
 ## Architecture
 
-Two pipelines, memory-budgeted for 16 GB:
+```
+Record:   BlackHole + mic → AudioCapture → 30s WAV chunks → disk
+Every 15 min:   new chunks → Deepgram (preview) → Gemini preview pass → notes panel
+Stop (Pass 1):  all chunks → Deepgram (diarize + keyterm) → canonical transcript
+                → Gemini Pass 1 → per-speaker summaries + in_character/other tags
+                → pass1.json + transcript.md written to disk
+Label speakers
+Finalize (Pass 2):  labeled + in_character-only transcript → Gemini → SessionNotes
+                    → notes.md + Obsidian export + campaign roster merge
+```
 
-- **Live:** BlackHole + mic → chunked WAVs → MLX Whisper → transcript lines. Lightweight LLM passes run on the tail of the transcript so the UI shows progress.
-- **Post-session:** Whisper unloads (freeing GPU memory), full audio is diarized in a subprocess, a chunked LLM pass organizes the whole transcript, and everything saves to markdown.
+Session state is a proper state machine: `RUNNING → PROCESSING_PASS1 → AWAITING_LABELS → PROCESSING_PASS2 → IDLE`. Pass 1 artifacts on disk mean an app crash between labeling and finalize doesn't lose work — the next launch offers to resume.
 
 ## Project Structure
 
 ```
 PassivePerception/
-├── run.py                    # Entry point, native window
-├── config.yaml               # User configuration
+├── run.py                    # Entry point, native window (pywebview)
+├── config.yaml               # Non-secret runtime config
 ├── setup.sh                  # One-command dev setup
 ├── build_macos.sh            # Signed + notarized .app + DMG
 ├── src/
-│   ├── app.py                # FastAPI routes + WebSocket
+│   ├── app.py                # FastAPI routes — REST only, no WebSockets
+│   ├── cloud_config.py       # API key storage in Application Support/.env
 │   ├── audio/                # Capture, buffering, device enumeration
-│   ├── transcription/        # MLX Whisper + diarization worker
-│   ├── notes/                # Ollama passes, JSON repair, merge logic
-│   ├── session/              # Lifecycle, storage, Obsidian export
-│   └── ui/static/            # Frontend — no build step
-├── swift-diarizer/           # FluidAudio Swift CLI (compiles to DiarizeCLI)
+│   ├── campaign/             # Persistent campaign roster (Pydantic + JSON per file)
+│   ├── transcription/        # Deepgram Nova-3 wrapper + WAV concat
+│   ├── notes/                # Gemini pass 1 + pass 2, Pydantic schemas, prompts
+│   ├── session/              # Lifecycle state machine, storage, Obsidian export
+│   └── ui/static/            # Frontend — vanilla HTML/CSS/JS, no build step
 └── sessions/                 # Saved session data (gitignored)
 ```
 
 ## Tech Stack
 
-- **Transcription:** [mlx-whisper](https://github.com/ml-explore/mlx-examples) on the Apple Neural Engine, with `faster-whisper` as CPU fallback
-- **Speaker ID:** [FluidAudio](https://github.com/FluidInference/FluidAudio) Swift CLI (primary), `simple-diarizer` Python fallback — all local, no HF token
-- **Notes LLM:** [Ollama](https://ollama.com) running `qwen3:4b` with structured JSON output
-- **Audio:** [sounddevice](https://python-sounddevice.readthedocs.io/) + BlackHole 2ch
-- **Server:** [FastAPI](https://fastapi.tiangolo.com/) + WebSockets, served by uvicorn
-- **Window:** [pywebview](https://pywebview.flowrl.com/) frameless native macOS window
-- **Frontend:** Vanilla HTML/CSS/JS — no build step
+- **Transcription + diarization:** [Deepgram Nova-3](https://deepgram.com) via `deepgram-sdk` — single API call, `keyterm` bias, `mip_opt_out` (no retention for training)
+- **Notes LLM:** [Google Gemini 2.5 Flash](https://ai.google.dev/) via `google-genai` — Pydantic structured output, 1M-token context so the full session fits in one pass
+- **Campaign roster:** Pydantic models serialized to per-campaign JSON, stored alongside Obsidian vault when configured
+- **Audio:** [sounddevice](https://python-sounddevice.readthedocs.io/) + BlackHole 2ch (optional secondary mic for the local player)
+- **Server:** [FastAPI](https://fastapi.tiangolo.com/) + uvicorn in a background thread
+- **Window:** [pywebview](https://pywebview.flowrl.com/) frameless native macOS window with native titlebar drag
+- **Frontend:** Vanilla HTML/CSS/JS — no build step, no framework
+
+## Privacy
+
+Audio and transcripts are sent to Deepgram and Gemini over HTTPS and are *not* retained for model training:
+
+- Deepgram: every request carries `mip_opt_out=true` (opts out of their Model Improvement Program)
+- Gemini: paid-tier API calls are not used to train their models
+
+Neither provider retains audio after processing by default on these tiers. Sessions are stored locally in `./sessions/` and optionally mirrored to your Obsidian vault — nothing else leaves your machine.
 
 ## License
 

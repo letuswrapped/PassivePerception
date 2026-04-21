@@ -1,20 +1,11 @@
 audio:
-  device: "BlackHole 2ch"   # auto-detected if this exact name is found
-  chunk_duration: 8          # seconds per audio chunk
+  device: "BlackHole 2ch"      # auto-detected if this exact name is found
+  chunk_duration: 30           # seconds per WAV chunk on disk
   sample_rate: 16000
   channels: 1
 
-transcription:
-  model: "small.en"          # model size: tiny.en, base.en, small.en, medium.en, large-v3
-  language: "en"
-  device: "cpu"              # cpu or cuda — ignored on Apple Silicon (MLX auto-selected)
-
-diarization:
-  threshold: 0.8               # clustering sensitivity 0.0–1.0 (lower = more speakers)
-
 notes:
-  llm_model: "qwen3:4b"           # Ollama model — run `ollama pull qwen3:4b` to download
-  update_interval: 300             # seconds between live LLM passes (notes also run post-session)
+  update_interval: 900         # seconds between mid-session note refreshes (default 15 min)
 
 output:
   directory: "./sessions"

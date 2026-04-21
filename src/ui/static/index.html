@@ -10,437 +10,386 @@
     @font-face { font-family: 'Glyseric'; src: url('/static/fonts/Glyseric.ttf') format('truetype'); font-display: swap; }
     @font-face { font-family: 'Helovatica'; src: url('/static/fonts/Helovatica.ttf') format('truetype'); font-display: swap; }
   </style>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=7" />
 </head>
-<body>
+<body data-theme="dark">
 <div id="app">
 
-  <!-- Top bar -->
+  <!-- ── Topbar (DO NOT rename #topbar or change height — run.py's 56px
+       drag monkey-patch depends on both.) ─────────────────────────── -->
   <div id="topbar">
-    <div class="brand">Passive Perception</div>
-    <input id="session-name-input" type="text" placeholder="Name this chronicle…" />
-    <select id="device-select">
-      <option value="">Loading devices…</option>
-    </select>
-    <div id="status-indicator"></div>
-    <div id="timer">00:00</div>
-    <button id="btn-start">Begin Session</button>
-    <button id="btn-new">New Session</button>
-    <button id="sessions-btn">Archives</button>
-    <button id="settings-btn" title="Settings">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="8" cy="8" r="2.5"/>
-        <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M2.9 2.9l1.05 1.05M12.05 12.05l1.05 1.05M2.9 13.1l1.05-1.05M12.05 3.95l1.05-1.05"/>
-      </svg>
-    </button>
-    <div id="processing-banner" style="display:none;">
-      <span id="processing-msg"></span>
+    <div class="topbar-left">
+      <div class="brand">Passive Perception</div>
+    </div>
+    <div class="topbar-center">
+      <span id="topbar-subtitle" class="topbar-subtitle"></span>
+    </div>
+    <div class="topbar-right">
+      <div id="status-indicator" class="status-indicator" title="Idle">
+        <span class="status-dot"></span>
+        <span id="status-text">Idle</span>
+      </div>
+      <button id="btn-archives" class="btn-ghost no-drag">Archives</button>
+      <button id="btn-settings" class="btn-ghost no-drag">⚙</button>
     </div>
   </div>
 
-  <!-- Panels -->
-  <div id="panels">
-    <!-- Transcript -->
-    <div id="panel-transcript" class="panel">
-      <div class="panel-header">Transcript <button class="export-btn" id="export-transcript" onclick="exportTranscript()">Export</button></div>
-      <div class="panel-body" id="transcript-body">
-        <div class="empty-state" id="transcript-empty">
-          Transcript will appear here once a session starts.
-        </div>
-      </div>
-    </div>
-
-    <!-- Notes -->
-    <div id="panel-notes" class="panel">
-      <div class="panel-header">Session Notes <span id="notes-updated"></span> <button class="export-btn" id="export-notes" onclick="exportNotes()">Export</button></div>
-      <div class="panel-body" id="notes-body">
-
-        <div class="notes-section" id="section-summary">
-          <div class="notes-section-header" onclick="toggleSection(this)">
-            <span class="chevron">▼</span> Summary
-          </div>
-          <div class="notes-section-content">
-            <div class="summary-text empty-state" id="summary-text">No summary yet.</div>
-          </div>
-        </div>
-
-        <div class="notes-section" id="section-npcs">
-          <div class="notes-section-header" onclick="toggleSection(this)">
-            <span class="chevron">▼</span> NPCs <span id="npc-count" style="color:var(--text-dim);margin-left:4px;font-weight:400;text-transform:none;letter-spacing:0;"></span>
-          </div>
-          <div class="notes-section-content" id="npcs-list">
-            <div class="empty-state">No NPCs identified yet.</div>
-          </div>
-        </div>
-
-        <div class="notes-section" id="section-locations">
-          <div class="notes-section-header" onclick="toggleSection(this)">
-            <span class="chevron">▼</span> Locations
-          </div>
-          <div class="notes-section-content" id="locations-list">
-            <div class="empty-state">No locations identified yet.</div>
-          </div>
-        </div>
-
-        <div class="notes-section" id="section-plot">
-          <div class="notes-section-header" onclick="toggleSection(this)">
-            <span class="chevron">▼</span> Plot Points
-          </div>
-          <div class="notes-section-content" id="plot-list">
-            <div class="empty-state">No plot points yet.</div>
-          </div>
-        </div>
-
-        <div class="notes-section" id="section-questions">
-          <div class="notes-section-header" onclick="toggleSection(this)">
-            <span class="chevron">▼</span> Open Questions
-          </div>
-          <div class="notes-section-content" id="questions-list">
-            <div class="empty-state">No open questions yet.</div>
-          </div>
-        </div>
-
-      </div>
-    </div>
+  <!-- Resume banner -->
+  <div id="resume-banner" class="resume-banner hidden">
+    <span id="resume-banner-text"></span>
+    <button id="resume-banner-action" class="btn-primary">Resume labeling</button>
+    <button id="resume-banner-dismiss" class="btn-ghost">Dismiss</button>
   </div>
 
-</div>
+  <!-- ── Main area (one view visible at a time) ───────────────────────── -->
+  <main id="main">
 
-<!-- Rename popover (shared) -->
-<div class="rename-popover" id="rename-popover" style="display:none;">
-  <input type="text" id="rename-input" placeholder="Speaker name" />
-  <button id="rename-confirm">Rename</button>
-</div>
+    <!-- ONBOARDING -->
+    <section id="view-onboarding" class="view hidden">
+      <div class="onboarding-card">
+        <div id="onboarding-step-dots" class="step-dots"></div>
 
-<!-- Onboarding Walkthrough -->
-<div id="onboarding-overlay" class="setup-overlay" style="display:none;">
-  <div class="setup-modal onboarding-modal">
-
-    <!-- Step indicators -->
-    <div class="onboarding-steps">
-      <div class="onboarding-dot active" data-step="0"></div>
-      <div class="onboarding-dot" data-step="1"></div>
-      <div class="onboarding-dot" data-step="2"></div>
-    </div>
-
-    <!-- Step 0: Welcome -->
-    <div class="onboarding-page active" data-step="0">
-      <div class="onboarding-icon">
-        <img src="/static/icon.svg" alt="Passive Perception" style="width:80px;height:80px;border-radius:16px;" />
-      </div>
-      <div class="setup-header" style="text-align:center;">Welcome to Passive Perception</div>
-      <p class="setup-sub" style="text-align:center;">
-        Your personal D&D session scribe. It listens to your game, transcribes everything, identifies who's speaking, and writes your campaign notes automatically.
-      </p>
-      <p class="setup-sub" style="text-align:center;color:var(--text-sub);">
-        Let's get you set up in a few quick steps.
-      </p>
-    </div>
-
-    <!-- Step 1: Audio Routing -->
-    <div class="onboarding-page" data-step="1">
-      <div class="setup-header">Set Up Audio Routing</div>
-      <p class="setup-sub">
-        The BlackHole audio driver was installed with the app. Now you need to create a Multi-Output Device so you can hear your game <em>and</em> the app can capture the audio.
-      </p>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">1</div>
-        <div>Open <strong>Audio MIDI Setup</strong><br>
-          <span class="onboarding-hint">Applications → Utilities → Audio MIDI Setup</span>
-          <button class="onboarding-open-btn" onclick="fetch('/system/open-midi-setup').catch(()=>{})">Open Audio MIDI Setup</button>
-        </div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">2</div>
-        <div>Click the <strong>+</strong> button at the bottom-left and select <strong>"Create Multi-Output Device"</strong></div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">3</div>
-        <div>Check <strong>both</strong> your headphones/speakers <strong>AND</strong> BlackHole 2ch</div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">4</div>
-        <div>Right-click the new device → <strong>"Use This Device For Sound Output"</strong></div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">5</div>
-        <div>In <strong>Discord</strong> Settings → Voice → Output Device → select <strong>"Multi-Output Device"</strong></div>
-      </div>
-    </div>
-
-    <!-- Step 2: Ready -->
-    <div class="onboarding-page" data-step="2">
-      <div class="onboarding-icon" style="font-size:48px;">⚔️</div>
-      <div class="setup-header" style="text-align:center;">You're All Set!</div>
-      <p class="setup-sub" style="text-align:center;">
-        Here's how it works:
-      </p>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">1</div>
-        <div>Select <strong>"BlackHole 2ch"</strong> as the audio input device in the top bar</div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">2</div>
-        <div>Name your session (e.g. "Session 14 — The Dragon's Lair")</div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">3</div>
-        <div>Click <strong>"Begin Session"</strong> — the transcript and notes update live as you play</div>
-      </div>
-      <div class="onboarding-instruction">
-        <div class="onboarding-step-num">4</div>
-        <div>When you're done, click <strong>"End Session"</strong> and export your notes</div>
-      </div>
-      <p class="setup-sub" style="text-align:center;margin-top:16px;color:var(--text-sub);">
-        Roll for initiative. The scribe is listening.
-      </p>
-    </div>
-
-    <!-- Navigation -->
-    <div class="onboarding-nav">
-      <button id="onboarding-back" class="setup-btn-ghost" style="visibility:hidden;">Back</button>
-      <button id="onboarding-next" class="setup-btn-primary">Get Started</button>
-    </div>
-  </div>
-</div>
-
-<!-- Player Setup Modal -->
-<div id="setup-overlay" class="setup-overlay" style="display:none;">
-  <div class="setup-modal">
-    <div class="setup-header">Welcome, Adventurer</div>
-    <p class="setup-sub">Tell us about yourself and your character so the scribe knows who to look for.</p>
-
-    <div class="setup-field">
-      <label for="setup-player-name">Your Name</label>
-      <input type="text" id="setup-player-name" placeholder="e.g. Colby" />
-    </div>
-
-    <div class="setup-field">
-      <label for="setup-char-name">Character Name</label>
-      <input type="text" id="setup-char-name" placeholder="e.g. Thorn Ironbark" />
-    </div>
-
-    <div class="setup-row">
-      <div class="setup-field">
-        <label for="setup-char-race">Race</label>
-        <input type="text" id="setup-char-race" placeholder="e.g. Half-Elf" />
-      </div>
-      <div class="setup-field">
-        <label for="setup-char-class">Class</label>
-        <input type="text" id="setup-char-class" placeholder="e.g. Ranger" />
-      </div>
-      <div class="setup-field">
-        <label for="setup-char-subclass">Subclass</label>
-        <input type="text" id="setup-char-subclass" placeholder="e.g. Gloom Stalker" />
-      </div>
-    </div>
-
-    <div class="setup-field setup-checkbox-field">
-      <label class="setup-check-label">
-        <input type="checkbox" id="setup-multiclass-check" />
-        <span>Multiclass</span>
-      </label>
-      <div id="multiclass-fields" style="display:none;">
-        <div class="setup-row" style="margin-top:8px;">
-          <div class="setup-field">
-            <label for="setup-multi-class">Second Class</label>
-            <input type="text" id="setup-multi-class" placeholder="e.g. Warlock" />
+        <div class="onboarding-step" data-step="0">
+          <h1>Welcome to Passive Perception</h1>
+          <p class="muted">A quiet scribe for your D&amp;D sessions. Captures Discord audio, identifies speakers, and writes notes that know what you care about.</p>
+          <p class="muted">Four quick steps.</p>
+          <div class="onboarding-nav">
+            <button class="btn-primary" data-action="next">Begin</button>
           </div>
-          <div class="setup-field">
-            <label for="setup-multi-subclass">Subclass</label>
-            <input type="text" id="setup-multi-subclass" placeholder="e.g. Hexblade" />
+        </div>
+
+        <div class="onboarding-step hidden" data-step="1">
+          <h1>API Keys</h1>
+          <p class="muted">Transcription runs through Deepgram, notes through Google Gemini. Both offer free tiers.</p>
+          <div class="form-field">
+            <label>Deepgram API key <span id="onb-dg-status" class="status-pill">not set</span></label>
+            <input type="password" id="onb-deepgram" placeholder="dg_…" autocomplete="off">
+            <div class="field-hint">Sign up at console.deepgram.com — $200 free credit.</div>
+          </div>
+          <div class="form-field">
+            <label>Gemini API key <span id="onb-gem-status" class="status-pill">not set</span></label>
+            <input type="password" id="onb-gemini" placeholder="AIza…" autocomplete="off">
+            <div class="field-hint">Sign up at aistudio.google.com/apikey — free tier works.</div>
+          </div>
+          <div class="onboarding-nav">
+            <button class="btn-ghost" data-action="back">Back</button>
+            <button class="btn-primary" id="onb-save-keys">Save &amp; continue</button>
+          </div>
+        </div>
+
+        <div class="onboarding-step hidden" data-step="2">
+          <h1>Audio Setup</h1>
+          <p class="muted">To capture Discord audio, create a Multi-Output Device in Audio MIDI Setup. This mirrors your headphones AND BlackHole simultaneously — you hear the game, the app captures it.</p>
+          <ol class="checklist">
+            <li>Open Audio MIDI Setup (below).</li>
+            <li>Click <strong>+</strong> at the bottom-left → <strong>Create Multi-Output Device</strong>.</li>
+            <li>Check both your headphones and <strong>BlackHole 2ch</strong>.</li>
+            <li>Right-click the new device → <strong>Use This Device For Sound Output</strong>.</li>
+            <li>In Discord: Voice &amp; Video → Output Device → Multi-Output Device.</li>
+          </ol>
+          <div class="onboarding-nav">
+            <button class="btn-ghost" data-action="back">Back</button>
+            <button class="btn-ghost" id="onb-open-midi">Open Audio MIDI Setup</button>
+            <button class="btn-primary" data-action="next">Done</button>
+          </div>
+        </div>
+
+        <div class="onboarding-step hidden" data-step="3">
+          <h1>Your First Campaign</h1>
+          <p class="muted">A campaign holds your character, party, NPCs, locations, and plot threads. Every session merges new info back in.</p>
+          <div class="form-grid-2">
+            <div class="form-field"><label>Campaign name</label><input type="text" id="onb-campaign-name" placeholder="Waterdeep: Dragon Heist"></div>
+            <div class="form-field"><label>System</label><input type="text" id="onb-campaign-system" value="D&amp;D 5e"></div>
+          </div>
+          <h3 class="section-header">Your character</h3>
+          <div class="form-grid-2">
+            <div class="form-field"><label>Name</label><input type="text" id="onb-char-name" placeholder="Thoren Ironforge"></div>
+            <div class="form-field"><label>Class</label><input type="text" id="onb-char-class" placeholder="Fighter"></div>
+            <div class="form-field"><label>Race</label><input type="text" id="onb-char-race" placeholder="Dwarf"></div>
+            <div class="form-field"><label>Subclass (optional)</label><input type="text" id="onb-char-subclass" placeholder="Battle Master"></div>
+          </div>
+          <div class="form-field">
+            <label>Backstory / what motivates them (optional)</label>
+            <textarea id="onb-char-backstory" rows="3" placeholder="Looking for his missing brother."></textarea>
+          </div>
+          <div class="form-field">
+            <label>What should the notes emphasize for you? (optional)</label>
+            <textarea id="onb-perspective" rows="2" placeholder="I care about clues tied to my brother and faction politics."></textarea>
+          </div>
+          <div class="onboarding-nav">
+            <button class="btn-ghost" data-action="back">Back</button>
+            <button class="btn-primary" id="onb-save-campaign">Create campaign &amp; finish</button>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="setup-field">
-      <label for="setup-char-bio">Character Bio / Backstory</label>
-      <textarea id="setup-char-bio" rows="4" placeholder="Anything the scribe should know — backstory, goals, allies, enemies…"></textarea>
-    </div>
-
-    <div class="setup-field">
-      <label class="setup-upload-label" id="setup-upload-label">
-        <input type="file" id="setup-bio-file" accept=".txt,.md,.pdf" style="display:none;" />
-        <span class="upload-btn-text">Upload a bio file</span>
-        <span class="upload-file-name" id="upload-file-name"></span>
-      </label>
-    </div>
-
-    <div class="setup-actions">
-      <button id="setup-skip" class="setup-btn-ghost">Skip for Now</button>
-      <button id="setup-save" class="setup-btn-primary">Save & Continue</button>
-    </div>
-  </div>
-</div>
-
-<!-- Settings Panel -->
-<div id="settings-overlay" class="settings-overlay" style="display:none;">
-  <div class="settings-panel">
-    <div class="settings-header">
-      <span>Settings</span>
-      <button id="settings-close" class="settings-close">&times;</button>
-    </div>
-
-    <!-- Appearance -->
-    <div class="settings-section">
-      <div class="settings-section-title">Appearance</div>
-      <div class="settings-row">
-        <span class="settings-label">Theme</span>
-        <div class="settings-toggle-group" id="theme-toggle">
-          <button class="settings-toggle-btn active" data-theme="light">Light</button>
-          <button class="settings-toggle-btn" data-theme="dark">Dark</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Microphone -->
-    <div class="settings-section">
-      <div class="settings-section-title">Your Microphone</div>
-      <p class="settings-hint">Select your mic so the app captures your voice alongside Discord audio.</p>
-      <div class="settings-row">
-        <select id="settings-mic-select" class="settings-mic-select">
-          <option value="">None (Discord audio only)</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- Player Info -->
-    <div class="settings-section">
-      <div class="settings-section-title">Player & Character</div>
-      <div class="setup-field">
-        <label for="settings-player-name">Your Name</label>
-        <input type="text" id="settings-player-name" placeholder="e.g. Colby" />
-      </div>
-      <div class="setup-field">
-        <label for="settings-char-name">Character Name</label>
-        <input type="text" id="settings-char-name" placeholder="e.g. Thorn Ironbark" />
-      </div>
-      <div class="setup-row">
-        <div class="setup-field">
-          <label for="settings-char-race">Race</label>
-          <input type="text" id="settings-char-race" placeholder="e.g. Half-Elf" />
-        </div>
-        <div class="setup-field">
-          <label for="settings-char-class">Class</label>
-          <input type="text" id="settings-char-class" placeholder="e.g. Ranger" />
-        </div>
-      </div>
-      <div class="setup-field">
-        <label for="settings-char-subclass">Subclass</label>
-        <input type="text" id="settings-char-subclass" placeholder="e.g. Gloom Stalker" />
-      </div>
-      <div class="setup-field">
-        <label for="settings-char-bio">Character Bio / Backstory</label>
-        <textarea id="settings-char-bio" rows="3" placeholder="Backstory, goals, allies, enemies…"></textarea>
-      </div>
-      <div style="text-align:right;margin-top:8px;">
-        <button id="settings-save-player" class="setup-btn-primary" style="padding:7px 16px;font-size:13px;">Save Changes</button>
-      </div>
-    </div>
-
-    <!-- Obsidian Integration -->
-    <div class="settings-section">
-      <div class="settings-section-title">Obsidian Integration</div>
-
-      <!-- Not connected state -->
-      <div id="obsidian-disconnected">
-        <div class="settings-integration">
-          <div class="settings-integration-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M6.48 2C5.33 2 4.28 2.7 3.88 3.78L2.07 8.56C1.84 9.17 2.04 9.85 2.55 10.24L9.42 15.38C9.76 15.63 10.22 15.63 10.56 15.38L17.44 10.24C17.95 9.85 18.15 9.17 17.92 8.56L16.11 3.78C15.71 2.7 14.66 2 13.51 2H6.48Z"/>
-              <path d="M10 15.5V18M6.5 17L10 18L13.5 17" stroke="currentColor" stroke-width="1" fill="none"/>
-            </svg>
+    <!-- HOME -->
+    <section id="view-home" class="view hidden">
+      <div class="home-grid">
+        <div class="home-main">
+          <h2 class="section-header">Tonight's session</h2>
+          <div class="form-field">
+            <label>Campaign
+              <button id="home-edit-campaign" class="btn-tiny inline-right">Edit roster</button>
+            </label>
+            <select id="home-campaign-picker"></select>
           </div>
-          <div class="settings-integration-info">
-            <div class="settings-integration-name">Obsidian</div>
-            <div class="settings-integration-desc">Auto-export session notes & transcript to your vault</div>
+          <div class="form-field">
+            <label>Session name (optional)</label>
+            <input type="text" id="home-session-name" placeholder="Defaults to today's date">
           </div>
-          <button id="obsidian-connect-btn" class="settings-connect-btn">Connect</button>
-        </div>
-      </div>
-
-      <!-- Setup / connected state -->
-      <div id="obsidian-setup" style="display:none;">
-        <div class="setup-field">
-          <label>Vault Path</label>
-          <div style="display:flex;gap:8px;">
-            <input type="text" id="obsidian-vault-path" placeholder="/Users/you/ObsidianVault" style="flex:1;" />
-            <button id="obsidian-browse" class="setup-btn-ghost" style="padding:8px 14px;font-size:12px;white-space:nowrap;">Browse</button>
+          <div class="form-field">
+            <label>Pre-session brief <span class="field-hint inline">— fed to the AI with your roster</span></label>
+            <textarea id="home-brief" rows="4" placeholder="Tonight we finally confront Xanathar. I want to find out what he knows about my brother."></textarea>
+          </div>
+          <div class="home-actions">
+            <button id="btn-record" class="btn-record">● Record</button>
+            <div id="home-preflight-msg" class="field-hint"></div>
           </div>
         </div>
-        <div class="setup-field">
+        <aside class="home-sidebar">
+          <h3 class="section-header">Roster preview</h3>
+          <div id="home-campaign-preview" class="campaign-preview"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- LIVE -->
+    <section id="view-live" class="view hidden">
+      <div class="live-grid">
+        <div class="live-main">
+          <div class="live-card">
+            <div class="live-timer" id="live-timer">00:00</div>
+            <div class="live-meter"><div class="live-meter-bar" id="live-meter-bar"></div></div>
+            <div class="live-progress muted" id="live-progress">Recording…</div>
+            <button id="btn-stop" class="btn-stop">■ Stop</button>
+          </div>
+          <div class="live-notes-card">
+            <h3 class="section-header">Notes so far</h3>
+            <p class="small muted">Refreshes roughly every 15 minutes as the session unfolds.</p>
+            <div id="live-notes-body">
+              <p class="muted">No notes yet — first refresh at the 15-minute mark.</p>
+            </div>
+          </div>
+        </div>
+        <aside class="live-sidebar">
+          <h3 class="section-header">What the AI sees</h3>
+          <p class="small muted">Your roster and tonight's brief are the context feeding Gemini.</p>
+          <div id="live-roster"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- LABELING -->
+    <section id="view-labeling" class="view hidden">
+      <div class="labeling-header">
+        <h2>Who was who?</h2>
+        <p class="muted">Pass 1 identified these speakers. Label each one, then finalize to generate notes. The pre-filled guess (if any) comes from your campaign roster — feel free to override.</p>
+      </div>
+      <div id="speaker-cards" class="speaker-cards"></div>
+      <div class="labeling-footer">
+        <button id="btn-finalize-skip" class="btn-ghost">Skip — use Speaker 1/2/3</button>
+        <button id="btn-finalize" class="btn-primary">Finalize notes</button>
+      </div>
+      <div class="labeling-transcript">
+        <h3 class="section-header">Full transcript <span id="tag-stats" class="muted small"></span></h3>
+        <div class="transcript-controls">
+          <label class="toggle">
+            <input type="checkbox" id="show-other" checked>
+            <span>Show table-talk (dimmed)</span>
+          </label>
+        </div>
+        <div id="labeling-transcript-body" class="transcript-body"></div>
+      </div>
+    </section>
+
+    <!-- NOTES -->
+    <section id="view-notes" class="view hidden">
+      <div class="notes-header">
+        <h2 id="notes-session-title">Session Notes</h2>
+        <div class="notes-actions">
+          <button id="btn-export-notes" class="btn-ghost">Export notes</button>
+          <button id="btn-export-transcript" class="btn-ghost">Export transcript</button>
+          <button id="btn-notes-home" class="btn-primary">Back home</button>
+        </div>
+      </div>
+      <div id="notes-body" class="notes-body"></div>
+      <div class="notes-transcript">
+        <h3 class="section-header">Transcript</h3>
+        <div id="notes-transcript-body" class="transcript-body"></div>
+      </div>
+    </section>
+
+    <!-- ARCHIVES -->
+    <section id="view-archives" class="view hidden">
+      <div class="archives-header">
+        <h2>Past sessions</h2>
+        <button id="archives-close" class="btn-ghost">Back home</button>
+      </div>
+      <div id="archives-list" class="archives-list"></div>
+      <div id="archives-detail" class="archives-detail hidden">
+        <button id="archive-detail-back" class="btn-ghost">← All sessions</button>
+        <h3 id="archive-detail-title"></h3>
+        <div class="archive-tabs">
+          <button class="archive-tab active" data-tab="notes">Notes</button>
+          <button class="archive-tab" data-tab="transcript">Transcript</button>
+        </div>
+        <div id="archive-detail-body" class="archive-detail-body"></div>
+        <div class="archive-detail-actions">
+          <button id="archive-delete" class="btn-danger">Delete session</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Settings slide-over ─────────────────────────────────────────── -->
+  <aside id="settings-panel" class="side-panel hidden">
+    <div class="side-panel-header">
+      <h2>Settings</h2>
+      <button id="settings-close" class="btn-ghost">Close</button>
+    </div>
+    <div class="side-panel-body">
+      <div class="settings-tabs">
+        <button class="settings-tab active" data-tab="keys">API Keys</button>
+        <button class="settings-tab" data-tab="campaigns">Campaigns</button>
+        <button class="settings-tab" data-tab="audio">Audio</button>
+        <button class="settings-tab" data-tab="obsidian">Obsidian</button>
+        <button class="settings-tab" data-tab="appearance">Appearance</button>
+      </div>
+
+      <div class="settings-pane" data-pane="keys">
+        <h3 class="section-header">API Keys</h3>
+        <p class="small muted">Keys are stored locally in your Application Support folder. They're sent to the providers, never to us.</p>
+        <div class="form-field">
+          <label>Deepgram <span id="set-dg-status" class="status-pill">not set</span></label>
+          <input type="password" id="set-deepgram" placeholder="Leave blank to keep existing" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label>Gemini <span id="set-gem-status" class="status-pill">not set</span></label>
+          <input type="password" id="set-gemini" placeholder="Leave blank to keep existing" autocomplete="off">
+        </div>
+        <div class="form-actions">
+          <button id="set-save-keys" class="btn-primary">Save</button>
+        </div>
+      </div>
+
+      <div class="settings-pane hidden" data-pane="campaigns">
+        <h3 class="section-header">Campaigns</h3>
+        <div id="set-campaign-list" class="campaign-list"></div>
+        <button id="set-new-campaign" class="btn-primary">New campaign</button>
+      </div>
+
+      <div class="settings-pane hidden" data-pane="audio">
+        <h3 class="section-header">Microphone (local player)</h3>
+        <p class="small muted">Optional — mixes your own voice into the capture so your lines show up in the transcript.</p>
+        <div class="form-field">
+          <label>Input device</label>
+          <select id="set-mic-device"><option value="">(none)</option></select>
+        </div>
+        <div class="form-actions">
+          <button id="set-open-midi" class="btn-ghost">Open Audio MIDI Setup</button>
+        </div>
+      </div>
+
+      <div class="settings-pane hidden" data-pane="obsidian">
+        <h3 class="section-header">Obsidian</h3>
+        <div id="set-obsidian-status" class="muted small">Loading…</div>
+        <div class="form-field">
+          <label>Vault path</label>
+          <div class="row">
+            <input type="text" id="set-obsidian-vault" placeholder="Select a vault…">
+            <button id="set-obsidian-browse" class="btn-ghost">Browse</button>
+          </div>
+        </div>
+        <div class="form-field">
           <label>Subfolder</label>
-          <input type="text" id="obsidian-subfolder" placeholder="D&D Sessions" value="D&D Sessions" />
-          <div class="settings-hint" style="margin-top:4px;">Notes will be saved inside this folder in your vault.</div>
+          <input type="text" id="set-obsidian-subfolder" value="D&amp;D Sessions">
         </div>
-        <div class="settings-row" style="margin-top:12px;margin-bottom:16px;">
-          <span class="settings-label">Auto-export on session end</span>
-          <div class="settings-toggle-group" id="obsidian-auto-toggle">
-            <button class="settings-toggle-btn active" data-val="true">On</button>
-            <button class="settings-toggle-btn" data-val="false">Off</button>
-          </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-obsidian-auto" checked>
+          <span>Auto-export sessions</span>
+        </label>
+        <div class="form-actions">
+          <button id="set-obsidian-save" class="btn-primary">Save</button>
+          <button id="set-obsidian-disconnect" class="btn-danger">Disconnect</button>
         </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="obsidian-disconnect" class="setup-btn-ghost" style="padding:7px 14px;font-size:12px;color:var(--danger);border-color:var(--danger);">Disconnect</button>
-          <button id="obsidian-save" class="setup-btn-primary" style="padding:7px 16px;font-size:13px;">Save</button>
-        </div>
-        <div id="obsidian-status" style="margin-top:10px;font-size:12px;color:var(--text-faint);"></div>
+      </div>
+
+      <div class="settings-pane hidden" data-pane="appearance">
+        <h3 class="section-header">Appearance</h3>
+        <label class="toggle">
+          <input type="checkbox" id="set-theme-dark" checked>
+          <span>Dark mode</span>
+        </label>
       </div>
     </div>
+  </aside>
 
-  </div>
+  <!-- ── Campaign editor slide-over ──────────────────────────────────── -->
+  <aside id="campaign-editor" class="side-panel side-panel-wide hidden">
+    <div class="side-panel-header">
+      <h2 id="ce-title">Edit campaign</h2>
+      <div class="row">
+        <button id="ce-save" class="btn-primary">Save</button>
+        <button id="ce-close" class="btn-ghost">Close</button>
+      </div>
+    </div>
+    <div class="side-panel-body">
+      <div class="form-grid-2">
+        <div class="form-field"><label>Campaign name</label><input type="text" id="ce-name"></div>
+        <div class="form-field"><label>System</label><input type="text" id="ce-system"></div>
+      </div>
+      <div class="form-field"><label>Setting (optional)</label><input type="text" id="ce-setting"></div>
+
+      <h3 class="section-header">Your character</h3>
+      <div class="form-grid-2">
+        <div class="form-field"><label>Name</label><input type="text" id="ce-player-name"></div>
+        <div class="form-field"><label>Pronouns</label><input type="text" id="ce-player-pronouns"></div>
+        <div class="form-field"><label>Race</label><input type="text" id="ce-player-race"></div>
+        <div class="form-field"><label>Class</label><input type="text" id="ce-player-class"></div>
+        <div class="form-field"><label>Subclass</label><input type="text" id="ce-player-subclass"></div>
+        <div class="form-field"><label>Multiclass</label><input type="text" id="ce-player-multi"></div>
+      </div>
+      <div class="form-field"><label>Description / appearance</label><textarea id="ce-player-description" rows="2"></textarea></div>
+      <div class="form-field"><label>Backstory</label><textarea id="ce-player-backstory" rows="3"></textarea></div>
+      <div class="form-field"><label>Goals</label><textarea id="ce-player-goals" rows="2"></textarea></div>
+      <div class="form-field">
+        <label>Perspective notes <span class="field-hint inline">— what should the notes emphasize for you?</span></label>
+        <textarea id="ce-perspective" rows="2"></textarea>
+      </div>
+
+      <h3 class="section-header">Party <button class="btn-tiny" id="ce-party-add">+ Add</button></h3>
+      <div id="ce-party-list" class="entity-list"></div>
+
+      <h3 class="section-header">NPCs <button class="btn-tiny" id="ce-npc-add">+ Add</button></h3>
+      <p class="small muted">Names here feed Deepgram's keyterm bias — keeps fantasy spellings intact.</p>
+      <div id="ce-npc-list" class="entity-list"></div>
+
+      <h3 class="section-header">Locations <button class="btn-tiny" id="ce-loc-add">+ Add</button></h3>
+      <div id="ce-loc-list" class="entity-list"></div>
+
+      <h3 class="section-header">Plot threads <button class="btn-tiny" id="ce-plot-add">+ Add</button></h3>
+      <div id="ce-plot-list" class="entity-list"></div>
+
+      <h3 class="section-header">Campaign state</h3>
+      <div class="form-field"><label>Recap summary (last time on…)</label><textarea id="ce-state-summary" rows="3"></textarea></div>
+      <div class="form-grid-2">
+        <div class="form-field"><label>Current location</label><input type="text" id="ce-state-location"></div>
+        <div class="form-field"><label>Planned next steps</label><input type="text" id="ce-state-next"></div>
+      </div>
+
+      <div class="form-actions-row">
+        <button id="ce-delete" class="btn-danger">Delete campaign</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
 </div>
-
-<!-- Archives Panel -->
-<div id="archives-overlay" class="settings-overlay" style="display:none;">
-  <div class="archives-panel">
-    <div class="settings-header">
-      <span>Archives</span>
-      <button id="archives-close" class="settings-close">&times;</button>
-    </div>
-
-    <!-- Session list view -->
-    <div id="archives-list-view">
-      <div class="archives-list" id="archives-list">
-        <div class="empty-state" style="padding:24px;">No past sessions found.</div>
-      </div>
-    </div>
-
-    <!-- Session detail view -->
-    <div id="archives-detail-view" style="display:none;">
-      <div class="archives-detail-header">
-        <button id="archives-back" class="archives-back-btn">← Back</button>
-        <span class="archives-detail-title" id="archives-detail-title"></span>
-      </div>
-      <div class="archives-detail-tabs">
-        <button class="archives-tab active" data-tab="notes">Notes</button>
-        <button class="archives-tab" data-tab="transcript">Transcript</button>
-        <div class="archives-detail-actions">
-          <button id="archives-export" class="export-btn" title="Export current tab">Export</button>
-          <button id="archives-delete" class="archives-delete-btn" title="Delete session">Delete</button>
-        </div>
-      </div>
-      <div class="archives-detail-body" id="archives-detail-body">
-        <div class="empty-state">Loading...</div>
-      </div>
-      <!-- Delete confirmation -->
-      <div id="archives-delete-confirm" class="archives-delete-confirm" style="display:none;">
-        <div class="archives-delete-confirm-inner">
-          <p>Are you sure you want to delete this session? This cannot be undone.</p>
-          <div class="archives-delete-confirm-actions">
-            <button id="archives-delete-cancel" class="setup-btn-ghost">Cancel</button>
-            <button id="archives-delete-yes" class="archives-delete-yes-btn">Delete Session</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div id="toast"></div>
-
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

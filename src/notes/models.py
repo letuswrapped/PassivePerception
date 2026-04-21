@@ -32,3 +32,32 @@ class SessionNotes(BaseModel):
     locations: list[Location] = Field(default_factory=list)
     plot_points: list[PlotPoint] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
+
+
+# ── Pass 1 output schemas (speaker summaries + per-utterance classification) ──
+#
+# Pass 1 runs once post-session on the full diarized transcript. It produces
+# human-readable speaker cards for the labeling UI plus a flat list of tags
+# that mark each utterance as in_character or other (table-talk, rules
+# lookups, off-topic chatter). Pass 2 uses the user-assigned labels + the
+# in_character filter to produce the final SessionNotes.
+
+
+class SpeakerSummary(BaseModel):
+    speaker_id: str                                   # e.g. "SPEAKER_00"
+    utterance_count: int = 0
+    total_seconds: float = 0.0
+    summary: str = ""                                  # one sentence, ≤160 chars
+    role_guess: str = "unknown"                        # "DM" | "player" | "unknown"
+    roster_guess: str = ""                             # best-match PC name from Campaign party/player ("" if unsure)
+    sample_quote_indices: list[int] = Field(default_factory=list)   # transcript line indices
+
+
+class UtteranceTag(BaseModel):
+    index: int                                        # position in canonical transcript
+    tag: str = "in_character"                          # "in_character" | "other"
+
+
+class Pass1Result(BaseModel):
+    speakers: list[SpeakerSummary] = Field(default_factory=list)
+    tags: list[UtteranceTag] = Field(default_factory=list)

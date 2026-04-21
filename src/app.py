@@ -5,22 +5,25 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from typing import Optional
 import yaml
-from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from src import cloud_config
 from src.audio.devices import list_input_devices
+from src.campaign.models import Campaign
+from src.campaign.storage import CampaignStore, save_campaign, slugify
 from src.session.manager import SessionManager, SessionState
-from src.transcription.diarization import TranscriptLine
+from src.transcription import TranscriptLine
 
-load_dotenv()
+# Load cloud API keys from Application Support/.env on startup
+cloud_config.load_keys()
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,8 +34,6 @@ with open(_CONFIG_PATH) as f:
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(title="Passive Perception")
-
-# Allow pywebview / localhost origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,6 +41,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount(
+    "/static",
+    StaticFiles(directory=Path(__file__).parent / "ui" / "static"),
+    name="static",
+)
 
 # ── Request models ────────────────────────────────────────────────────────────
 class StartSessionRequest(BaseModel):
@@ -51,34 +57,19 @@ class RenameSpeakerRequest(BaseModel):
     label: str
 
 
-class PlayerContextRequest(BaseModel):
-    player_name: str = ""
-    char_name: str = ""
-    char_race: str = ""
-    char_class: str = ""
-    char_subclass: str = ""
-    multiclass: bool = False
-    multi_class: str = ""
-    multi_subclass: str = ""
-    char_bio: str = ""
+class ApiKeysRequest(BaseModel):
+    deepgram: Optional[str] = None
+    gemini: Optional[str] = None
 
 
-# ── Player context (persisted to disk) ────────────────────────────────────────
-_PLAYER_CONTEXT_PATH = Path(__file__).parent.parent / "player_context.json"
-_player_context: dict = {}
+class PreBriefRequest(BaseModel):
+    brief: str = ""
 
-def _load_player_context() -> dict:
-    if _PLAYER_CONTEXT_PATH.exists():
-        try:
-            return json.loads(_PLAYER_CONTEXT_PATH.read_text())
-        except Exception:
-            pass
-    return {}
 
-_player_context = _load_player_context()
+class FinalizeRequest(BaseModel):
+    labels: Optional[dict[str, str]] = None
+    skip: bool = False
 
-# ── Mic device (persisted in-memory, applied to each new session) ────────
-_mic_device: str | None = None
 
 # ── Obsidian config (persisted to disk) ──────────────────────────────────
 _OBSIDIAN_CONFIG_PATH = Path(__file__).parent.parent / "obsidian_config.json"
@@ -94,67 +85,81 @@ def _load_obsidian_config() -> dict:
 
 _obsidian_config = _load_obsidian_config()
 
-app.mount(
-    "/static",
-    StaticFiles(directory=Path(__file__).parent / "ui" / "static"),
-    name="static",
-)
-
 # ── Global session state ──────────────────────────────────────────────────────
 _session: SessionManager | None = None
-_transcript_clients: list[WebSocket] = []
-_notes_clients: list[WebSocket] = []
+_mic_device: str | None = None
 
 
-# ── WebSocket helpers ─────────────────────────────────────────────────────────
+# ── API key routes ───────────────────────────────────────────────────────────
 
-async def _broadcast_transcript(line: TranscriptLine) -> None:
-    payload = json.dumps({
-        "type": "transcript_line",
-        "start": line.start,
-        "end": line.end,
-        "speaker_id": line.speaker_id,
-        "speaker_label": line.speaker_label,
-        "text": line.text,
-    })
-    dead = []
-    for ws in _transcript_clients:
-        try:
-            await ws.send_text(payload)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _transcript_clients.remove(ws)
+@app.get("/settings/api-keys")
+async def get_api_key_status():
+    """Returns boolean flags per provider — never returns the actual key."""
+    return cloud_config.status()
 
 
-async def _broadcast_notes() -> None:
-    if _session is None:
-        return
-    notes = _session.get_notes()
-    payload = json.dumps({"type": "notes_update", "notes": notes.model_dump()})
-    dead = []
-    for ws in _notes_clients:
-        try:
-            await ws.send_text(payload)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _notes_clients.remove(ws)
+@app.post("/settings/api-keys")
+async def save_api_keys(body: ApiKeysRequest):
+    cloud_config.save_keys(deepgram=body.deepgram, gemini=body.gemini)
+    return {"ok": True, "status": cloud_config.status()}
 
 
-# ── Player context routes ─────────────────────────────────────────────────────
+# ── Campaign routes ──────────────────────────────────────────────────────────
 
-@app.post("/player/context")
-async def set_player_context(body: PlayerContextRequest):
-    global _player_context
-    _player_context = body.model_dump()
-    _PLAYER_CONTEXT_PATH.write_text(json.dumps(_player_context, indent=2))
-    return {"status": "saved"}
+@app.get("/campaigns")
+async def list_campaigns():
+    return {"campaigns": CampaignStore.list(), "active": _active_campaign_id()}
 
 
-@app.get("/player/context")
-async def get_player_context():
-    return _player_context
+@app.get("/campaigns/active")
+async def get_active_campaign():
+    c = CampaignStore.active()
+    return {"campaign": c.model_dump() if c else None}
+
+
+@app.post("/campaigns/active")
+async def set_active_campaign(payload: dict):
+    campaign_id = (payload.get("id") or "").strip()
+    if not campaign_id:
+        CampaignStore.clear_active()
+        return {"ok": True, "active": None}
+    if not CampaignStore.load(campaign_id):
+        raise HTTPException(404, f"Campaign '{campaign_id}' not found")
+    CampaignStore.set_active(campaign_id)
+    return {"ok": True, "active": campaign_id}
+
+
+@app.get("/campaigns/{campaign_id}")
+async def get_campaign(campaign_id: str):
+    c = CampaignStore.load(campaign_id)
+    if not c:
+        raise HTTPException(404, f"Campaign '{campaign_id}' not found")
+    return c.model_dump()
+
+
+@app.post("/campaigns")
+async def upsert_campaign(payload: dict):
+    """Create or update a campaign. Body is the full Campaign shape."""
+    if "id" not in payload or not payload["id"]:
+        payload["id"] = slugify(payload.get("name", "untitled"))
+    try:
+        campaign = Campaign.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid campaign: {exc}")
+    CampaignStore.save(campaign)
+    return {"ok": True, "campaign": campaign.model_dump()}
+
+
+@app.delete("/campaigns/{campaign_id}")
+async def delete_campaign(campaign_id: str):
+    if not CampaignStore.delete(campaign_id):
+        raise HTTPException(404, f"Campaign '{campaign_id}' not found")
+    return {"ok": True}
+
+
+def _active_campaign_id() -> Optional[str]:
+    c = CampaignStore.active()
+    return c.id if c else None
 
 
 # ── Obsidian routes ──────────────────────────────────────────────────────────
@@ -163,6 +168,7 @@ async def get_player_context():
 async def get_obsidian_config():
     return _obsidian_config
 
+
 @app.post("/settings/obsidian")
 async def set_obsidian_config(payload: dict):
     global _obsidian_config
@@ -170,22 +176,18 @@ async def set_obsidian_config(payload: dict):
     subfolder = payload.get("subfolder", "D&D Sessions").strip()
     auto_export = payload.get("auto_export", True)
 
-    # Validate vault path
     if vault_path:
-        vault = Path(vault_path)
+        vault = Path(vault_path).expanduser()
         if not vault.exists() or not vault.is_dir():
             return {"ok": False, "error": "Vault folder not found"}
-        obsidian_dir = vault / ".obsidian"
-        if not obsidian_dir.exists():
+        if not (vault / ".obsidian").exists():
             return {"ok": False, "error": "Not an Obsidian vault (no .obsidian folder)"}
+        vault_path = str(vault)
 
-    _obsidian_config = {
-        "vault_path": vault_path,
-        "subfolder": subfolder,
-        "auto_export": auto_export,
-    }
+    _obsidian_config = {"vault_path": vault_path, "subfolder": subfolder, "auto_export": auto_export}
     _OBSIDIAN_CONFIG_PATH.write_text(json.dumps(_obsidian_config, indent=2))
     return {"ok": True}
+
 
 @app.post("/settings/obsidian/disconnect")
 async def disconnect_obsidian():
@@ -195,9 +197,9 @@ async def disconnect_obsidian():
         _OBSIDIAN_CONFIG_PATH.unlink()
     return {"ok": True}
 
+
 @app.post("/settings/obsidian/browse")
 async def browse_obsidian_vault():
-    """Open a native folder picker and return the selected path."""
     import subprocess
     result = subprocess.run(
         ["osascript", "-e",
@@ -211,7 +213,7 @@ async def browse_obsidian_vault():
     return {"ok": True, "path": path}
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Root + device routes ──────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -226,7 +228,6 @@ async def get_devices():
 
 @app.post("/settings/mic-device")
 async def set_mic_device(payload: dict):
-    """Set the microphone device for dual-source capture (local player's voice)."""
     global _mic_device
     device_name = payload.get("device", "").strip() or None
     _mic_device = device_name
@@ -235,21 +236,16 @@ async def set_mic_device(payload: dict):
     return {"ok": True, "device": device_name}
 
 
+# ── Session polling routes ────────────────────────────────────────────────────
+
 @app.get("/session/transcript_lines")
 async def get_transcript_lines(offset: int = 0, diar_version: int = -1):
-    """
-    Return transcript lines from offset onward.
-    If diar_version differs from current, also return full=True so the
-    frontend knows to re-render all lines with updated speaker labels.
-    """
     if _session is None:
         return {"lines": [], "total": 0, "diar_version": 0, "full_refresh": False}
 
     all_lines = _session.get_transcript()
     current_version = _session.diar_version
     full_refresh = diar_version != -1 and diar_version != current_version
-
-    # On full refresh send everything; otherwise just new lines
     lines_to_send = all_lines if full_refresh else all_lines[offset:]
 
     return {
@@ -272,7 +268,6 @@ async def get_transcript_lines(offset: int = 0, diar_version: int = -1):
 
 @app.get("/session/notes")
 async def get_current_notes():
-    """Return the current session notes (for polling)."""
     if _session is None:
         return {"notes": None}
     return {"notes": _session.get_notes().model_dump()}
@@ -280,7 +275,6 @@ async def get_current_notes():
 
 @app.get("/session/export/transcript")
 async def export_transcript():
-    """Download the current transcript as a markdown file."""
     if _session is None:
         return PlainTextResponse("No active session", status_code=404)
     transcript = _session.get_transcript()
@@ -297,7 +291,6 @@ async def export_transcript():
 
 @app.get("/session/export/notes")
 async def export_notes():
-    """Download the current session notes as a markdown file."""
     if _session is None:
         return PlainTextResponse("No active session", status_code=404)
     notes = _session.get_notes()
@@ -315,49 +308,125 @@ async def export_notes():
 @app.get("/session/status")
 async def session_status():
     if _session is None:
-        return {"state": SessionState.IDLE, "elapsed": 0, "progress": ""}
+        return {"state": SessionState.IDLE, "elapsed": 0, "progress": "", "session_id": None}
     return {
         "state": _session.state,
         "elapsed": _session.elapsed_seconds,
         "progress": _session.progress_message,
+        "session_id": _session.session_id,
     }
+
+
+# ── Pre-session brief (on the active campaign) ────────────────────────────────
+
+@app.post("/session/pre-brief")
+async def save_pre_brief(body: PreBriefRequest):
+    campaign = CampaignStore.active()
+    if campaign is None:
+        raise HTTPException(400, "No active campaign")
+    campaign.pending_session_brief = body.brief or ""
+    save_campaign(campaign)
+    return {"ok": True, "brief": campaign.pending_session_brief}
+
+
+@app.get("/session/pre-brief")
+async def get_pre_brief():
+    campaign = CampaignStore.active()
+    return {"brief": campaign.pending_session_brief if campaign else ""}
+
+
+# ── Pass 1 results + finalize + resume ───────────────────────────────────────
+
+@app.get("/session/pass1")
+async def get_pass1():
+    """Return the Pass 1 result (speaker summaries + classification tags) + canonical transcript."""
+    if _session is None:
+        raise HTTPException(404, "No session")
+    pass1 = _session.get_pass1_result()
+    if pass1 is None:
+        return {"ready": False}
+    transcript = _session.get_transcript()
+    return {
+        "ready": True,
+        "state": _session.state,
+        "pass1": pass1.model_dump(),
+        "transcript": [
+            {
+                "index": i,
+                "start": ln.start,
+                "end": ln.end,
+                "speaker_id": ln.speaker_id,
+                "speaker_label": ln.speaker_label,
+                "text": ln.text,
+            }
+            for i, ln in enumerate(transcript)
+        ],
+    }
+
+
+@app.post("/session/labels")
+async def set_labels(payload: dict):
+    """Apply speaker labels without triggering Pass 2 (lets the UI save progress as the user types)."""
+    if _session is None:
+        raise HTTPException(404, "No session")
+    labels = {k: str(v) for k, v in (payload.get("labels") or {}).items() if v}
+    _session.apply_labels(labels)
+    return {"ok": True}
+
+
+@app.post("/session/finalize")
+async def finalize_session(body: FinalizeRequest):
+    if _session is None:
+        raise HTTPException(404, "No session")
+    if _session.state != SessionState.AWAITING_LABELS:
+        raise HTTPException(409, f"Session is in {_session.state}; cannot finalize")
+    try:
+        await _session.finalize(labels=body.labels, skip=body.skip)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    return {"ok": True, "state": _session.state}
+
+
+@app.get("/session/resumable")
+async def list_resumable():
+    from src.session.storage import list_resumable_sessions
+    output_dir = Path(CONFIG["output"]["directory"])
+    dirs = list_resumable_sessions(output_dir)
+    return {"sessions": [{"id": p.name, "name": p.name} for p in dirs]}
+
+
+@app.post("/session/resume/{session_id}")
+async def resume_session(session_id: str):
+    global _session
+    if _session and _session.state not in (SessionState.IDLE,):
+        raise HTTPException(409, f"Another session is active ({_session.state})")
+
+    output_dir = Path(CONFIG["output"]["directory"])
+    session_dir = output_dir / session_id
+    if not session_dir.is_dir():
+        raise HTTPException(404, "Session not found")
+
+    campaign = CampaignStore.active()
+    try:
+        _session = SessionManager.resume_from_pass1(CONFIG, campaign, session_dir)
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to resume: {exc}")
+
+    async def on_notes():
+        pass  # no websocket broadcast any more — UI polls
+
+    _session.on_notes_update(on_notes)
+    return {"ok": True, "state": _session.state, "session_id": _session.session_id}
 
 
 @app.get("/system/open-midi-setup")
 async def open_midi_setup():
-    """Open Audio MIDI Setup on macOS."""
     import subprocess
     subprocess.Popen(["open", "/Applications/Utilities/Audio MIDI Setup.app"])
     return {"ok": True}
 
 
-@app.post("/settings/hf-token")
-async def save_hf_token(payload: dict):
-    """Save HuggingFace token to .env file."""
-    import os
-    token = payload.get("token", "").strip()
-    if not token:
-        return {"ok": False, "error": "No token provided"}
-
-    env_path = Path(".env")
-    lines = []
-    if env_path.exists():
-        lines = env_path.read_text().splitlines()
-
-    # Replace or add the token line
-    found = False
-    for i, line in enumerate(lines):
-        if line.startswith("HUGGINGFACE_TOKEN"):
-            lines[i] = f"HUGGINGFACE_TOKEN={token}"
-            found = True
-            break
-    if not found:
-        lines.append(f"HUGGINGFACE_TOKEN={token}")
-
-    env_path.write_text("\n".join(lines) + "\n")
-    os.environ["HUGGINGFACE_TOKEN"] = token
-    return {"ok": True}
-
+# ── Session lifecycle ────────────────────────────────────────────────────────
 
 @app.post("/session/start")
 async def session_start(body: StartSessionRequest = StartSessionRequest()):
@@ -365,20 +434,19 @@ async def session_start(body: StartSessionRequest = StartSessionRequest()):
     if _session and _session.state == SessionState.RUNNING:
         return {"error": "Session already running"}
 
-    _session = SessionManager(CONFIG, player_context=_player_context or None)
+    # Preflight — both API keys required
+    missing = [k for k, ok in cloud_config.status().items() if not ok]
+    if missing:
+        return {"error": f"Missing API keys: {', '.join(missing)}. Add them in Settings → API Keys."}
 
-    # Apply saved mic device so dual capture works from the start
+    campaign = CampaignStore.active()
+    if campaign is None:
+        return {"error": "No active campaign. Create or select one in Settings → Campaigns."}
+
+    _session = SessionManager(CONFIG, campaign=campaign)
+
     if _mic_device:
         _session.set_mic_device(_mic_device)
-
-    async def on_transcript(line: TranscriptLine):
-        await _broadcast_transcript(line)
-
-    async def on_notes():
-        await _broadcast_notes()
-
-    _session.on_transcript_line(on_transcript)
-    _session.on_notes_update(on_notes)
 
     await _session.start(session_name=body.session_name)
     return {"status": "started", "state": _session.state}
@@ -390,7 +458,7 @@ async def session_stop():
     if _session is None or _session.state != SessionState.RUNNING:
         return {"error": "No active session"}
     await _session.stop()
-    return {"status": "processing"}  # post-session diarization now running in background
+    return {"status": "processing"}
 
 
 @app.post("/session/rename_speaker")
@@ -400,6 +468,8 @@ async def rename_speaker(body: RenameSpeakerRequest):
     _session.rename_speaker(body.speaker_id, body.label)
     return {"status": "ok"}
 
+
+# ── Saved session archive ─────────────────────────────────────────────────────
 
 @app.get("/sessions")
 async def list_sessions():
@@ -436,50 +506,12 @@ async def get_session_transcript(session_id: str):
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a saved session directory."""
     import shutil
     session_dir = Path(CONFIG["output"]["directory"]) / session_id
     if not session_dir.exists() or not session_dir.is_dir():
         return {"error": "Session not found"}
-    # Safety: only delete within the output directory
     output_dir = Path(CONFIG["output"]["directory"]).resolve()
     if not session_dir.resolve().is_relative_to(output_dir):
         return {"error": "Invalid session path"}
     shutil.rmtree(session_dir)
     return {"ok": True}
-
-
-# ── WebSockets ────────────────────────────────────────────────────────────────
-
-@app.websocket("/ws/transcript")
-async def ws_transcript(websocket: WebSocket):
-    await websocket.accept()
-    _transcript_clients.append(websocket)
-    # Send existing transcript on connect
-    if _session:
-        for line in _session.get_transcript():
-            await _broadcast_transcript(line)
-    try:
-        while True:
-            await websocket.receive_text()  # keep alive, handle pings
-    except WebSocketDisconnect:
-        if websocket in _transcript_clients:
-            _transcript_clients.remove(websocket)
-
-
-@app.websocket("/ws/notes")
-async def ws_notes(websocket: WebSocket):
-    await websocket.accept()
-    _notes_clients.append(websocket)
-    # Send current notes on connect
-    if _session:
-        notes = _session.get_notes()
-        await websocket.send_text(
-            json.dumps({"type": "notes_update", "notes": notes.model_dump()})
-        )
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        if websocket in _notes_clients:
-            _notes_clients.remove(websocket)

@@ -33,7 +33,6 @@ info "Checking pyenv..."
 if ! command -v pyenv &>/dev/null; then
   info "Installing pyenv via Homebrew..."
   brew install pyenv
-  # Add pyenv to shell profile
   SHELL_PROFILE=""
   if [ -f "$HOME/.zshrc" ]; then SHELL_PROFILE="$HOME/.zshrc"
   elif [ -f "$HOME/.bash_profile" ]; then SHELL_PROFILE="$HOME/.bash_profile"
@@ -99,54 +98,15 @@ else
   read -p "Press Enter once you've completed the Multi-Output Device setup..."
 fi
 
-# ── 6. Ollama + LLM model ───────────────────────────────────────────────────
-divider
-info "Checking Ollama..."
-if ! command -v ollama &>/dev/null; then
-  info "Installing Ollama via Homebrew..."
-  brew install ollama
-fi
-info "Ollama found: $(ollama --version 2>/dev/null || echo 'installed')"
-
-# Start Ollama in the background if not already running
-if ! pgrep -x "ollama" &>/dev/null; then
-  info "Starting Ollama service..."
-  ollama serve &>/dev/null &
-  sleep 2
-fi
-
-info "Pulling Qwen3 4B model (~2.5 GB download)..."
-ollama pull qwen3:4b
-info "LLM model ready."
-
-# ── 7. FluidAudio Swift CLI (speaker diarization) ───────────────────────────
-divider
-info "Building FluidAudio diarization CLI (Apple Neural Engine)..."
-echo ""
-if [ -f "swift-diarizer/.build/release/DiarizeCLI" ]; then
-  info "DiarizeCLI already built."
-else
-  if command -v swift &>/dev/null; then
-    (cd swift-diarizer && swift build -c release 2>&1)
-    if [ -f "swift-diarizer/.build/release/DiarizeCLI" ]; then
-      info "DiarizeCLI built — diarization models will auto-download on first use (~200 MB)"
-    else
-      warn "Swift build failed — will fall back to Python-based diarization (slower)"
-    fi
-  else
-    warn "Swift compiler not found — will fall back to Python-based diarization"
-    warn "Install Xcode Command Line Tools: xcode-select --install"
-  fi
-fi
-
 # ── Done ──────────────────────────────────────────────────────────────────────
 divider
 echo ""
 echo -e "  ${GREEN}Setup complete!${NC}"
 echo ""
+echo "  Transcription and note generation use Deepgram and Gemini (cloud APIs)."
+echo "  Add your API keys in Settings → API Keys the first time you launch."
+echo ""
 echo "  To start Passive Perception:"
 echo "    source .venv/bin/activate"
 echo "    python run.py"
-echo ""
-echo "  This will open http://localhost:8000 in your browser."
 echo ""

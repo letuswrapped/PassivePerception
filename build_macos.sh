@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Passive Perception"
 BUNDLE_ID="com.passiveperception.app"
-VERSION="1.1.3"
+VERSION="2.0.0"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
@@ -201,7 +201,7 @@ This will take 5–10 minutes and requires an internet connection." || exit 0
   # ── Virtual environment + dependencies ───────────────────────────────────
   log "Creating virtual environment..."
   notify "Installing Python packages — this takes a few minutes..."
-  PROGRESS_PID=$(progress_dialog "Installing Python packages...\n\nDownloading ML models for speech recognition and note generation.")
+  PROGRESS_PID=$(progress_dialog "Installing Python packages...")
   "$PYTHON_BIN" -m venv "$VENV_DIR" >> "$LOG_FILE" 2>&1
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip --quiet >> "$LOG_FILE" 2>&1
@@ -234,14 +234,6 @@ BHDIALOG
     fi
   fi
 
-  # ── stt CLI (speaker diarization via FluidAudio/CoreML) ───────────────────
-  if ! command -v stt &>/dev/null; then
-    log "Installing stt CLI (speaker diarization)..."
-    notify "Installing speaker diarization engine..."
-    brew tap jvsteiner/tap >> "$LOG_FILE" 2>&1
-    brew install stt >> "$LOG_FILE" 2>&1
-  fi
-
   notify "Setup complete! Launching Passive Perception..."
   log "Setup complete"
   echo "$APP_VERSION" > "$VERSION_STAMP"
@@ -250,9 +242,8 @@ fi
 # ── Upgrade path ─────────────────────────────────────────────────────────────
 # If the app version changed since last launch (or the stamp is missing from
 # a pre-1.1.1 install), reinstall Python deps against the current
-# requirements.txt. This is what was biting us on the 1.0 → 1.1 jump: the
-# venv existed so setup was skipped, but requirements had changed (pyannote
-# → ollama + simple-diarizer) and the backend failed to import.
+# requirements.txt. Same trap bit us on 1.0 → 1.1: venv existed so setup
+# was skipped, but requirements had changed and the backend failed to import.
 INSTALLED_VERSION="$(cat "$VERSION_STAMP" 2>/dev/null || echo none)"
 if [ "$INSTALLED_VERSION" != "$APP_VERSION" ]; then
   log "Upgrade detected ($INSTALLED_VERSION → $APP_VERSION) — reinstalling Python deps"
@@ -281,45 +272,12 @@ export PYENV_ROOT="$HOME/.pyenv"
 export PATH="$PYENV_ROOT/bin:$PATH"
 eval "$(pyenv init -)" 2>/dev/null
 
-# Brew-installed tools (ffmpeg, ollama, stt) must be on PATH for python
-# subprocesses to find them. First-run setup installed them, but subshell
-# PATH doesn't persist — re-apply on every launch.
-eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null
-
 source "$VENV_DIR/bin/activate"
 
-# ── Self-heal prerequisites on every launch ─────────────────────────────────
-# Runs on both upgrades and installs predating these prereqs. Idempotent —
-# `brew install X` is a no-op when X is already installed. These were missed
-# on the original first-run setup, so older installs launch without them.
-if ! command -v ffmpeg &>/dev/null; then
-  log "Installing ffmpeg (required by MLX Whisper for audio decoding)..."
-  notify "Installing ffmpeg..."
-  brew install ffmpeg >> "$LOG_FILE" 2>&1
-fi
-
-if ! command -v ollama &>/dev/null; then
-  log "Installing Ollama (required for note generation)..."
-  notify "Installing Ollama..."
-  brew install ollama >> "$LOG_FILE" 2>&1
-fi
-
-# Start ollama serve in the background if it isn't already running. The
-# Python client hits localhost:11434; without a running server, notes fail.
-if ! pgrep -f "ollama serve" >/dev/null; then
-  log "Starting ollama serve..."
-  nohup ollama serve >> "$LOG_FILE" 2>&1 &
-  sleep 2
-fi
-
-# Pull the qwen3:4b model if missing (~2.5 GB, one-time download).
-if command -v ollama &>/dev/null && ! ollama list 2>/dev/null | grep -q "qwen3:4b"; then
-  log "Pulling qwen3:4b model..."
-  notify "Downloading qwen3:4b LLM (~2.5 GB, one-time)..."
-  PROGRESS_PID=$(progress_dialog "Downloading qwen3:4b LLM...\n\nOne-time download, ~2.5 GB.")
-  ollama pull qwen3:4b >> "$LOG_FILE" 2>&1
-  kill_progress "$PROGRESS_PID"
-fi
+# Cloud backend — no local ML binaries (ffmpeg / ollama / whisper models) needed.
+# Deepgram (transcription+diarization) and Gemini (notes) are accessed over
+# HTTPS; the only runtime requirement beyond Python deps is BlackHole for
+# audio capture, which is installed during first-run setup.
 
 # Run from a writable CWD. The config declares `./sessions` and `./tmp` as
 # relative paths, and the app bundle under /Applications is read-only on a
