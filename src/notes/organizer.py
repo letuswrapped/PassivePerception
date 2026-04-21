@@ -39,11 +39,69 @@ from src.notes.prompts import (
 logger = logging.getLogger(__name__)
 
 
-_MODEL = "gemini-2.5-flash"
+# Primary notes model, with fallbacks when 2.5-flash is overloaded (503) or
+# the per-minute free-tier limit is hit (429). `flash-lite` is lighter and
+# has a separate rate-limit bucket on the free tier; it's our safety net.
+# Order matters — we stop at the first model that succeeds.
+_MODEL_FALLBACKS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+]
+
+# Retry policy for transient errors (503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED).
+# Exponential-ish backoff, capped so a truly-down provider doesn't hold the
+# session hostage. Total wall time ~14s per model before falling through.
+_RETRY_DELAYS_SECONDS = [1, 3, 6]
+
+# Back-compat alias for any tests that reference it
+_MODEL = _MODEL_FALLBACKS[0]
 
 
 class NoteOrganizerError(RuntimeError):
     pass
+
+
+def _is_transient(exc: Exception) -> bool:
+    """503 UNAVAILABLE or 429 RESOURCE_EXHAUSTED — worth retrying or falling through."""
+    msg = str(exc)
+    return "503" in msg or "UNAVAILABLE" in msg or "429" in msg or "RESOURCE_EXHAUSTED" in msg
+
+
+def _generate_with_fallback(client, *, contents, config, call_label: str):
+    """
+    Call Gemini with automatic retry-then-model-fallback.
+
+    Tries each model in _MODEL_FALLBACKS in order; for each, retries with
+    exponential backoff on transient 503/429. Falls through to the next
+    model on persistent transient errors. Returns the response or None.
+    Non-transient errors abort immediately (caller logs and handles None).
+    """
+    import time
+    last_exc: Optional[Exception] = None
+    for model in _MODEL_FALLBACKS:
+        for attempt, delay in enumerate([0, *_RETRY_DELAYS_SECONDS]):
+            if delay:
+                time.sleep(delay)
+            try:
+                response = client.models.generate_content(
+                    model=model, contents=contents, config=config,
+                )
+                if attempt > 0 or model != _MODEL_FALLBACKS[0]:
+                    logger.info("[notes] %s succeeded on %s (attempt %d)", call_label, model, attempt + 1)
+                return response
+            except Exception as exc:
+                last_exc = exc
+                if not _is_transient(exc):
+                    logger.error("[notes] %s non-transient failure on %s: %s", call_label, model, exc)
+                    return None
+                logger.warning(
+                    "[notes] %s transient failure on %s (attempt %d): %s",
+                    call_label, model, attempt + 1, str(exc)[:160],
+                )
+        logger.warning("[notes] %s exhausted retries on %s — falling through to next model", call_label, model)
+    logger.error("[notes] %s failed on all models. Last error: %s", call_label, last_exc)
+    return None
 
 
 class NoteOrganizer:
@@ -134,19 +192,18 @@ class NoteOrganizer:
         system = build_system_prompt(self._campaign)
         user = build_user_prompt(transcript, existing_json, mode=mode)
 
-        try:
-            response = client.models.generate_content(
-                model=_MODEL,
-                contents=user,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system,
-                    response_mime_type="application/json",
-                    response_schema=SessionNotes,
-                    temperature=0.3,
-                ),
-            )
-        except Exception as exc:
-            logger.error("[notes] Gemini notes call failed: %s", exc)
+        response = _generate_with_fallback(
+            client,
+            contents=user,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system,
+                response_mime_type="application/json",
+                response_schema=SessionNotes,
+                temperature=0.3,
+            ),
+            call_label=f"notes {mode}",
+        )
+        if response is None:
             return None
 
         raw = (getattr(response, "text", "") or "").strip()
@@ -179,19 +236,18 @@ class NoteOrganizer:
         system = build_pass1_system_prompt(self._campaign)
         user = build_pass1_user_prompt(transcript_lines)
 
-        try:
-            response = client.models.generate_content(
-                model=_MODEL,
-                contents=user,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system,
-                    response_mime_type="application/json",
-                    response_schema=Pass1Result,
-                    temperature=0.2,
-                ),
-            )
-        except Exception as exc:
-            logger.error("[notes] Gemini pass1 call failed: %s", exc)
+        response = _generate_with_fallback(
+            client,
+            contents=user,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system,
+                response_mime_type="application/json",
+                response_schema=Pass1Result,
+                temperature=0.2,
+            ),
+            call_label="pass1",
+        )
+        if response is None:
             return None
 
         raw = (getattr(response, "text", "") or "").strip()
