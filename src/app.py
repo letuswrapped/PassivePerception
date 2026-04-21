@@ -364,6 +364,25 @@ async def get_pass1():
     }
 
 
+@app.post("/session/transcript/reassign")
+async def reassign_transcript_line(payload: dict):
+    """Move a single line to a different speaker (used during labeling to fix diarization mis-splits)."""
+    if _session is None:
+        raise HTTPException(404, "No session")
+    if _session.state != SessionState.AWAITING_LABELS:
+        raise HTTPException(409, f"Can only reassign lines in AWAITING_LABELS state (current: {_session.state})")
+    try:
+        line_index = int(payload.get("line_index"))
+        new_speaker_id = str(payload.get("speaker_id", "")).strip()
+    except (TypeError, ValueError):
+        raise HTTPException(400, "line_index (int) and speaker_id (str) required")
+    try:
+        _session.reassign_line(line_index, new_speaker_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
 @app.post("/session/labels")
 async def set_labels(payload: dict):
     """Apply speaker labels without triggering Pass 2 (lets the UI save progress as the user types)."""

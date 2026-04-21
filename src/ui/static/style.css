@@ -1856,12 +1856,52 @@ button { font-family: var(--font-body); cursor: pointer; }
 .transcript-line.tag-other { opacity: 0.48; }
 .transcript-time { color: var(--text-faint); font-size: 0.8rem; }
 .transcript-speaker { font-weight: 600; font-size: 0.88rem; }
-.transcript-speaker.spk-0 { color: #C4863E; }
-.transcript-speaker.spk-1 { color: #6A8050; }
-.transcript-speaker.spk-2 { color: #C0503A; }
-.transcript-speaker.spk-3 { color: #8B7455; }
-.transcript-speaker.spk-4 { color: #5C7A8A; }
-.transcript-speaker.spk-5 { color: #A85B9B; }
+.transcript-speaker.spk-0,  .transcript-speaker-select.spk-0 { color: #C4863E; }
+.transcript-speaker.spk-1,  .transcript-speaker-select.spk-1 { color: #6A8050; }
+.transcript-speaker.spk-2,  .transcript-speaker-select.spk-2 { color: #C0503A; }
+.transcript-speaker.spk-3,  .transcript-speaker-select.spk-3 { color: #8B7455; }
+.transcript-speaker.spk-4,  .transcript-speaker-select.spk-4 { color: #5C7A8A; }
+.transcript-speaker.spk-5,  .transcript-speaker-select.spk-5 { color: #A85B9B; }
+
+/* Inline speaker reassign dropdown — minimal chrome so it feels like a label,
+   not a form field. Shows a subtle border on hover so it's discoverable. */
+.transcript-speaker-select {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.transcript-speaker-select:hover {
+  border-color: var(--border);
+  background: var(--bg-surface-alt);
+}
+.transcript-speaker-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-surface-alt);
+}
+.transcript-speaker-select option {
+  background: var(--bg-card);
+  color: var(--text);
+  font-weight: normal;
+}
+
+/* Brief flash animation after a successful reassign */
+@keyframes lineFlash {
+  0%   { background: rgba(196, 134, 62, 0.20); }
+  100% { background: transparent; }
+}
+.transcript-line.line-flash { animation: lineFlash 0.6s ease-out; }
 .transcript-text { color: var(--text); }
 
 /* ── Notes view ───────────────────────────────────────────────────── */

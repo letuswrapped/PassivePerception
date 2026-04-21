@@ -466,7 +466,17 @@ function paintSpeakerCards() {
     inp.addEventListener('input', (e) => {
       const sid = e.target.dataset.speaker;
       state.currentLabels[sid] = e.target.value;
+      // Keep the transcript dropdowns in sync so reassignment shows current labels
+      syncTranscriptSpeakerLabels(sid);
     });
+  });
+}
+
+function syncTranscriptSpeakerLabels(speakerId) {
+  // Update the <option> text for this speaker across every transcript dropdown
+  const label = state.currentLabels[speakerId]?.trim() || _defaultSpeakerLabel(speakerId);
+  $$(`.transcript-speaker-select option[value="${speakerId}"]`).forEach((opt) => {
+    opt.textContent = label;
   });
 }
 
@@ -480,20 +490,63 @@ function paintLabelingTranscript() {
   const other = (pass1.tags || []).length - inChar;
   $('tag-stats').textContent = `${inChar} in-character · ${other} table-talk`;
 
+  // All known speaker_ids, so the line-level dropdown can offer them
+  const allSpeakerIds = (pass1.speakers || []).map(s => s.speaker_id);
+  // Include any speaker_ids that only appear in the transcript (edge case)
+  transcript.forEach(ln => {
+    if (ln.speaker_id && !allSpeakerIds.includes(ln.speaker_id)) allSpeakerIds.push(ln.speaker_id);
+  });
+  allSpeakerIds.sort();
+
   const rows = transcript.map((line, i) => {
     const tag = tagByIdx[i] || 'in_character';
     const colorIdx = _speakerColorIndex(line.speaker_id);
-    const labelDraft = state.currentLabels[line.speaker_id] || line.speaker_label;
+    const options = allSpeakerIds.map((sid) => {
+      const draft = state.currentLabels[sid] || _defaultSpeakerLabel(sid);
+      return `<option value="${esc(sid)}" ${sid === line.speaker_id ? 'selected' : ''}>${esc(draft)}</option>`;
+    }).join('');
     return `
-      <div class="transcript-line ${tag === 'other' ? 'tag-other' : ''}" data-tag="${tag}">
+      <div class="transcript-line ${tag === 'other' ? 'tag-other' : ''}" data-tag="${tag}" data-idx="${i}">
         <span class="transcript-time">${fmtTime(line.start)}</span>
-        <span class="transcript-speaker spk-${colorIdx}">${esc(labelDraft)}</span>
+        <select class="transcript-speaker-select spk-${colorIdx}" data-idx="${i}" title="Reassign this line to a different speaker">${options}</select>
         <span class="transcript-text">${esc(line.text)}</span>
       </div>
     `;
   });
   host.innerHTML = rows.join('');
   applyOtherVisibility();
+
+  // Wire change handlers for speaker reassignment
+  $$('.transcript-speaker-select', host).forEach((sel) => {
+    sel.addEventListener('change', async (e) => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      const newSpeaker = e.target.value;
+      try {
+        await api('/session/transcript/reassign', {
+          method: 'POST',
+          body: JSON.stringify({ line_index: idx, speaker_id: newSpeaker }),
+        });
+        // Update local state so any repaint reflects the change
+        state.pass1.transcript[idx].speaker_id = newSpeaker;
+        // Update the row's color class
+        const row = sel.closest('.transcript-line');
+        const newColor = _speakerColorIndex(newSpeaker);
+        sel.className = sel.className.replace(/spk-\d+/, `spk-${newColor}`);
+        row?.classList.add('line-flash');
+        setTimeout(() => row?.classList.remove('line-flash'), 600);
+      } catch (err) {
+        toast('Reassign failed: ' + err.message, 'error');
+        // Revert the select to the old value
+        const old = state.pass1.transcript[idx].speaker_id;
+        e.target.value = old;
+      }
+    });
+  });
+}
+
+function _defaultSpeakerLabel(speakerId) {
+  const m = /SPEAKER_(\d+)/.exec(speakerId);
+  return m ? `Speaker ${parseInt(m[1], 10) + 1}` : speakerId;
 }
 
 function _speakerColorIndex(speakerId) {

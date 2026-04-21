@@ -190,6 +190,32 @@ class SessionManager:
                 continue
             self.rename_speaker(speaker_id, label.strip())
 
+    def reassign_line(self, line_index: int, new_speaker_id: str) -> None:
+        """
+        Move a single transcript line to a different speaker. Used from the
+        labeling UI to fix diarization mis-splits where a speaker briefly
+        got reattributed in the middle of a longer utterance.
+
+        Persists the updated transcript.json + transcript.md so Pass 2 (and
+        any resume flow) sees the correction.
+        """
+        if line_index < 0 or line_index >= len(self._canonical_transcript):
+            raise ValueError(f"Line index {line_index} out of range (0..{len(self._canonical_transcript)-1})")
+        new_speaker_id = (new_speaker_id or "").strip()
+        if not new_speaker_id:
+            raise ValueError("new_speaker_id is required")
+        line = self._canonical_transcript[line_index]
+        line.speaker_id = new_speaker_id
+        line.speaker_label = self._speaker_labels.get(
+            new_speaker_id, default_speaker_label(new_speaker_id),
+        )
+        if self._session_dir:
+            from src.session.storage import write_transcript_only
+            try:
+                write_transcript_only(self._session_dir, self._canonical_transcript)
+            except Exception as exc:
+                logger.warning("Failed to persist transcript after reassign: %s", exc)
+
     async def finalize(self, labels: Optional[dict[str, str]] = None, skip: bool = False) -> None:
         """Kick off Pass 2 with the user-supplied labels (or default labels if skip=True)."""
         if self._state != SessionState.AWAITING_LABELS:
