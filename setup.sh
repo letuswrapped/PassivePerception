@@ -76,27 +76,26 @@ info "Installing Python dependencies..."
 pip install -r requirements.txt
 info "Python dependencies installed."
 
-# ── 5. BlackHole ─────────────────────────────────────────────────────────────
+# ── 5. Swift toolchain + native helper ───────────────────────────────────────
 divider
-info "Checking for BlackHole 2ch audio driver..."
-if ls /Library/Audio/Plug-Ins/HAL/ 2>/dev/null | grep -qi "blackhole"; then
-  info "BlackHole is already installed."
-else
-  info "Installing BlackHole 2ch via Homebrew..."
-  brew install blackhole-2ch
-  echo ""
-  warn "BlackHole installed! You now need to create a Multi-Output Device so you"
-  warn "can hear Discord AND have Passive Perception capture it simultaneously."
-  echo ""
-  echo "  Steps (do this once):"
-  echo "  1. Open  Audio MIDI Setup  (Applications > Utilities > Audio MIDI Setup)"
-  echo "  2. Click the '+' button at bottom-left → 'Create Multi-Output Device'"
-  echo "  3. Check both your headphones/speakers AND 'BlackHole 2ch'"
-  echo "  4. Right-click the new Multi-Output Device → 'Use This Device For Sound Output'"
-  echo "  5. In Discord: Settings → Voice & Video → Output Device → Multi-Output Device"
-  echo ""
-  read -p "Press Enter once you've completed the Multi-Output Device setup..."
+info "Checking Swift toolchain (for the native system-audio helper)..."
+if ! xcode-select -p &>/dev/null; then
+  warn "Xcode Command Line Tools are not installed. Install them with:"
+  warn "  xcode-select --install"
+  error "Re-run this script after the install finishes."
 fi
+if ! command -v swift &>/dev/null; then
+  error "Swift compiler not found even though Xcode CLT is installed. Re-install with xcode-select --install."
+fi
+info "Swift toolchain found: $(swift --version | head -1)"
+
+info "Building native system-audio helper (pp-system-audio)..."
+(
+  cd native/macos/pp-system-audio
+  swift build -c release --arch arm64
+)
+info "Native helper built at native/macos/pp-system-audio/.build/release/pp-system-audio"
+info "System audio capture: macOS will ask permission the first time you record. No driver install needed."
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 divider

@@ -13,8 +13,9 @@ class AudioCaptureBackend(ABC):
     Platform-specific audio capture backend.
 
     Implementations:
-      - macos.py  — BlackHole via sounddevice (macOS)
-      - windows.py — WASAPI loopback (Windows, future)
+      - macos.py         — BlackHole via sounddevice (legacy macOS, fallback)
+      - macos_system.py  — Core Audio Process Tap helper (macOS 14.2+, default)
+      - windows.py       — WASAPI loopback (Windows, future)
 
     The callback receives mono float32 samples at the target sample rate.
     It is called from the audio thread and must be non-blocking.

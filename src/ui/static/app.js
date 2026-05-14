@@ -426,7 +426,7 @@ function paintSpeakerCards() {
     host.innerHTML = `
       <div class="speaker-card" style="grid-column: 1 / -1;">
         <p><strong>No speech was detected in this session.</strong></p>
-        <p class="muted small">The recording produced an empty transcript. The most common cause is that Discord audio wasn't routed through BlackHole — open Settings → Audio (or Audio MIDI Setup) and make sure your Discord output device is a Multi-Output Device that includes BlackHole 2ch.</p>
+        <p class="muted small">The recording produced an empty transcript. Common causes: (1) Audio Capture permission wasn't granted — open <strong>System Settings → Privacy &amp; Security → Audio Capture</strong> and enable Passive Perception; (2) Discord was muted or the call had no audio; (3) on the BlackHole fallback path: Discord's output isn't routed through a Multi-Output Device that includes BlackHole 2ch.</p>
         <p class="small" style="margin-top:12px;"><button id="labeling-abandon" class="btn-ghost">Back home</button></p>
       </div>
     `;
@@ -1146,6 +1146,7 @@ function wireEvents() {
   // Audio
   $('set-mic-device').addEventListener('change', saveSettingsMic);
   $('set-open-midi').addEventListener('click', () => api('/system/open-midi-setup'));
+  $('set-open-audio-privacy').addEventListener('click', () => api('/system/open-audio-privacy'));
 
   // Obsidian
   $('set-obsidian-browse').addEventListener('click', async () => {
@@ -1193,7 +1194,6 @@ function wireEvents() {
   $$('[data-action="next"]').forEach(b => b.addEventListener('click', onboardingNext));
   $$('[data-action="back"]').forEach(b => b.addEventListener('click', onboardingBack));
   $('onb-save-keys').addEventListener('click', onboardingSaveKeys);
-  $('onb-open-midi').addEventListener('click', () => api('/system/open-midi-setup'));
   $('onb-save-campaign').addEventListener('click', onboardingCreateCampaign);
 
   // Home

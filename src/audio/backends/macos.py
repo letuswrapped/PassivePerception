@@ -1,4 +1,10 @@
-"""macOS audio capture backend — BlackHole loopback via sounddevice."""
+"""
+Legacy macOS audio capture backend — BlackHole loopback via sounddevice.
+
+Used as the fallback when the native pp-system-audio Process Tap helper is
+unavailable (macOS < 14.2, helper missing, or Audio Capture permission
+denied). New installs default to `src/audio/backends/macos_system.py`.
+"""
 
 from __future__ import annotations
 

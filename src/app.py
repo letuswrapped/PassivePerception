@@ -223,7 +223,18 @@ async def index():
 
 @app.get("/devices")
 async def get_devices():
-    return {"devices": list_input_devices()}
+    # `primary` exposes the native macOS system-audio source. The current UI
+    # ignores this field but it's emitted alongside `devices` for forward
+    # compat — a future picker can switch primary capture without code churn.
+    from src.audio.macos_helper import check_os_supported
+    return {
+        "primary": {
+            "id": "system_audio",
+            "name": "System Audio",
+            "available": check_os_supported(),
+        },
+        "devices": list_input_devices(),
+    }
 
 
 @app.post("/settings/mic-device")
@@ -442,6 +453,19 @@ async def resume_session(session_id: str):
 async def open_midi_setup():
     import subprocess
     subprocess.Popen(["open", "/Applications/Utilities/Audio MIDI Setup.app"])
+    return {"ok": True}
+
+
+@app.get("/system/open-audio-privacy")
+async def open_audio_privacy():
+    # Deep-link to the Audio Capture (Process Tap) privacy pane. The same
+    # URL works for Audio Capture on macOS 14.2+; on older systems it falls
+    # back to the parent Privacy & Security pane.
+    import subprocess
+    subprocess.Popen([
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
+    ])
     return {"ok": True}
 
 

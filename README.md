@@ -6,7 +6,7 @@ A macOS app that listens to your D&D sessions, transcribes the conversation with
 
 ## What It Does
 
-1. **Captures audio** from Discord via the BlackHole virtual audio driver.
+1. **Captures system audio** from Discord (or any app) via native macOS Core Audio Process Taps — no virtual audio driver, no Multi-Output Device. BlackHole stays as an automatic fallback if you're on macOS < 14.2 or deny the permission.
 2. **Transcribes + diarizes** the full session through **Deepgram Nova-3**, with your campaign roster fed in as `keyterm` bias so fantasy proper nouns come out correct.
 3. **Identifies speakers** with a post-session Gemini pass that writes a one-line summary per speaker — you label them once in the UI (pre-filled with the best guess from your party roster) and the rest of the pipeline takes over.
 4. **Classifies every utterance** as either in-character play or table-talk (rules lookups, off-topic chatter). Table-talk is dimmed in the transcript and *excluded* from the notes pass so your summary isn't polluted by the pizza order debate.
@@ -22,9 +22,10 @@ All of this — the roster, the brief, your character's perspective — is injec
 
 ## Requirements
 
-- **macOS** (Apple Silicon recommended)
+- **macOS 14.2 or later, Apple Silicon** (older Macs can fall back to BlackHole 2ch)
 - **Python 3.11** (the setup script installs this via pyenv)
 - **Homebrew** ([install here](https://brew.sh))
+- **Xcode Command Line Tools** (for building the native system-audio helper) — run `xcode-select --install` if not present
 - A **[Deepgram](https://console.deepgram.com/)** API key — $200 of free credit, no card required
 - A **[Google Gemini](https://aistudio.google.com/apikey)** API key — generous free tier works
 
@@ -34,15 +35,15 @@ No cloud subscription on our side — you bring your own API keys so you control
 
 1. Download the latest DMG from [Releases](https://github.com/letuswrapped/PassivePerception/releases/latest)
 2. Drag **Passive Perception** to Applications and launch it
-3. Walk through onboarding: enter both API keys → set up BlackHole / Multi-Output Device → create your first campaign (name + character) → done
-4. You're on the home screen. Write a pre-session brief, hit **Record**, play your game
+3. Walk through onboarding: enter both API keys → create your first campaign (name + character) → done
+4. You're on the home screen. Write a pre-session brief, hit **Record**, play your game. macOS will ask permission to capture system audio the first time — click **Allow**.
 
 ## Quick Start (from source)
 
 ```bash
 git clone https://github.com/letuswrapped/PassivePerception.git
 cd PassivePerception
-./setup.sh                          # Python 3.11 + venv + deps + BlackHole
+./setup.sh                          # Python 3.11 + venv + deps + Swift helper
 source .venv/bin/activate
 python run.py                       # opens the native window
 ```
@@ -56,15 +57,18 @@ GEMINI_API_KEY=...
 
 ## Audio Setup
 
-To capture Discord audio, create a **Multi-Output Device** so you can hear the call *and* have the app see it:
+On macOS 14.2+, there is nothing to set up. The first time you press **Record**, macOS asks permission to capture system audio — click **Allow** and you're done. No virtual audio driver, no Multi-Output Device.
 
-1. Open **Audio MIDI Setup** (Applications > Utilities)
-2. Click **+** at the bottom-left → **Create Multi-Output Device**
-3. Check both your **headphones/speakers** and **BlackHole 2ch**
-4. Right-click the new device → **Use This Device For Sound Output**
-5. In Discord: Settings → Voice & Video → Output Device → **Multi-Output Device**
+**On macOS 13.x or if you deny the permission**, the app falls back to BlackHole 2ch automatically when it's installed. Setup for that path:
 
-The onboarding flow has a button that opens Audio MIDI Setup for you.
+1. `brew install blackhole-2ch`
+2. Open **Audio MIDI Setup** (Applications > Utilities)
+3. Click **+** at the bottom-left → **Create Multi-Output Device**
+4. Check both your **headphones/speakers** and **BlackHole 2ch**
+5. Right-click the new device → **Use This Device For Sound Output**
+6. In Discord: Settings → Voice & Video → Output Device → **Multi-Output Device**
+
+To force the BlackHole path explicitly (e.g. if you prefer the audible-feedback behavior of a Multi-Output Device), set `audio.device: "BlackHole 2ch"` in `config.yaml`.
 
 ## How a session runs
 
@@ -83,7 +87,7 @@ If you quit mid-labeling, the next launch offers a **Resume labeling** banner �
 
 ```yaml
 audio:
-  device: "BlackHole 2ch"
+  device: "system_audio"      # native macOS Process Tap (14.2+); falls back to BlackHole
   chunk_duration: 30          # seconds per on-disk WAV chunk
 notes:
   update_interval: 900        # seconds between mid-session notes refreshes (default 15 min)
@@ -97,7 +101,7 @@ API keys live in `~/Library/Application Support/Passive Perception/.env` (never 
 ## Architecture
 
 ```
-Record:   BlackHole + mic → AudioCapture → 30s WAV chunks → disk
+Record:   System Audio + mic → AudioCapture → 30s WAV chunks → disk
 Every 15 min:   new chunks → Deepgram (preview) → Gemini preview pass → notes panel
 Stop (Pass 1):  all chunks → Deepgram (diarize + keyterm) → canonical transcript
                 → Gemini Pass 1 → per-speaker summaries + in_character/other tags
@@ -117,10 +121,11 @@ PassivePerception/
 ├── config.yaml               # Non-secret runtime config
 ├── setup.sh                  # One-command dev setup
 ├── build_macos.sh            # Signed + notarized .app + DMG
+├── native/macos/pp-system-audio/  # Swift helper — Core Audio Process Tap, streams PCM to stdout
 ├── src/
 │   ├── app.py                # FastAPI routes — REST only, no WebSockets
 │   ├── cloud_config.py       # API key storage in Application Support/.env
-│   ├── audio/                # Capture, buffering, device enumeration
+│   ├── audio/                # Capture, buffering, device enumeration (+ macos_system backend)
 │   ├── campaign/             # Persistent campaign roster (Pydantic + JSON per file)
 │   ├── transcription/        # Deepgram Nova-3 wrapper + WAV concat
 │   ├── notes/                # Gemini pass 1 + pass 2, Pydantic schemas, prompts
@@ -134,7 +139,7 @@ PassivePerception/
 - **Transcription + diarization:** [Deepgram Nova-3](https://deepgram.com) via `deepgram-sdk` — single API call, `keyterm` bias, `mip_opt_out` (no retention for training)
 - **Notes LLM:** [Google Gemini 2.5 Flash](https://ai.google.dev/) via `google-genai` — Pydantic structured output, 1M-token context so the full session fits in one pass
 - **Campaign roster:** Pydantic models serialized to per-campaign JSON, stored alongside Obsidian vault when configured
-- **Audio:** [sounddevice](https://python-sounddevice.readthedocs.io/) + BlackHole 2ch (optional secondary mic for the local player)
+- **Audio:** Native Core Audio Process Taps via a bundled Swift helper (`pp-system-audio`); [sounddevice](https://python-sounddevice.readthedocs.io/) for the optional secondary mic. BlackHole 2ch supported as a fallback.
 - **Server:** [FastAPI](https://fastapi.tiangolo.com/) + uvicorn in a background thread
 - **Window:** [pywebview](https://pywebview.flowrl.com/) frameless native macOS window with native titlebar drag
 - **Frontend:** Vanilla HTML/CSS/JS — no build step, no framework

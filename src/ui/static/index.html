@@ -79,17 +79,10 @@
 
         <div class="onboarding-step hidden" data-step="2">
           <h1>Audio Setup</h1>
-          <p class="muted">To capture Discord audio, create a Multi-Output Device in Audio MIDI Setup. This mirrors your headphones AND BlackHole simultaneously — you hear the game, the app captures it.</p>
-          <ol class="checklist">
-            <li>Open Audio MIDI Setup (below).</li>
-            <li>Click <strong>+</strong> at the bottom-left → <strong>Create Multi-Output Device</strong>.</li>
-            <li>Check both your headphones and <strong>BlackHole 2ch</strong>.</li>
-            <li>Right-click the new device → <strong>Use This Device For Sound Output</strong>.</li>
-            <li>In Discord: Voice &amp; Video → Output Device → Multi-Output Device.</li>
-          </ol>
+          <p class="muted">Passive Perception captures Discord and any other system audio directly — no virtual audio device or Multi-Output configuration required. The first time you start a recording, macOS will ask permission to capture system audio. Click <strong>Allow</strong>.</p>
+          <p class="muted small">macOS 14.2 or later. Already have BlackHole installed? It still works as a fallback if you prefer.</p>
           <div class="onboarding-nav">
             <button class="btn-ghost" data-action="back">Back</button>
-            <button class="btn-ghost" id="onb-open-midi">Open Audio MIDI Setup</button>
             <button class="btn-primary" data-action="next">Done</button>
           </div>
         </div>
@@ -282,6 +275,12 @@
       </div>
 
       <div class="settings-pane hidden" data-pane="audio">
+        <h3 class="section-header">System audio</h3>
+        <p class="small muted">Discord and other apps are captured natively via macOS Core Audio (14.2+). If recordings come back empty, the most likely cause is that Audio Capture permission was denied.</p>
+        <div class="form-actions">
+          <button id="set-open-audio-privacy" class="btn-ghost">Open Privacy Settings</button>
+        </div>
+
         <h3 class="section-header">Microphone (local player)</h3>
         <p class="small muted">Optional — mixes your own voice into the capture so your lines show up in the transcript.</p>
         <div class="form-field">

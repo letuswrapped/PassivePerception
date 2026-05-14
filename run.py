@@ -25,15 +25,23 @@ URL  = f"http://{HOST}:{PORT}"
 
 
 def check_prerequisites() -> None:
-    # BlackHole
-    hal_dir = Path("/Library/Audio/Plug-Ins/HAL")
-    if hal_dir.exists():
-        blackhole = any("blackhole" in p.name.lower() for p in hal_dir.iterdir())
-    else:
-        blackhole = False
-    if not blackhole:
-        print("[warn] BlackHole audio driver not found.")
-        print("       Install with: brew install blackhole-2ch")
+    # Native macOS system audio capture (Core Audio Process Taps, 14.2+).
+    # Side-effect-free check — does NOT trigger the TCC permission prompt.
+    # If the helper is unavailable AND BlackHole is also missing, the user
+    # gets an actionable error at session-start time.
+    from src.audio.macos_helper import check_os_supported
+    if not check_os_supported():
+        hal_dir = Path("/Library/Audio/Plug-Ins/HAL")
+        blackhole = (
+            hal_dir.exists()
+            and any("blackhole" in p.name.lower() for p in hal_dir.iterdir())
+        )
+        if blackhole:
+            print("[warn] Native system audio helper unavailable; will fall back to BlackHole 2ch.")
+        else:
+            print("[warn] No audio capture path available.")
+            print("       Native capture needs macOS 14.2+ with the pp-system-audio helper installed.")
+            print("       Or install BlackHole as a fallback: brew install blackhole-2ch")
 
     # Cloud API keys (Deepgram + Gemini) — loaded from Application Support/.env
     from src import cloud_config

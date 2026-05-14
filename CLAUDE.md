@@ -1,6 +1,6 @@
 # Passive Perception — Claude Context
 
-Cloud-backed D&D session scribe for macOS. Captures Discord audio via BlackHole, transcribes + diarizes via Deepgram Nova-3, extracts structured notes via Google Gemini 2.5 Flash, and auto-exports to an Obsidian vault. A persistent per-campaign roster (PCs, NPCs, locations, plot threads) biases both Deepgram (fantasy-name recognition) and Gemini (entity continuity + player perspective) so each session builds on the last.
+Cloud-backed D&D session scribe for macOS. Captures Discord audio natively via Core Audio Process Taps (macOS 14.2+) — no virtual audio driver — transcribes + diarizes via Deepgram Nova-3, extracts structured notes via Google Gemini 2.5 Flash, and auto-exports to an Obsidian vault. A persistent per-campaign roster (PCs, NPCs, locations, plot threads) biases both Deepgram (fantasy-name recognition) and Gemini (entity continuity + player perspective) so each session builds on the last.
 
 ## Session start
 
@@ -22,7 +22,7 @@ Cloud-backed D&D session scribe for macOS. Captures Discord audio via BlackHole,
 - **Python 3.11** via pyenv.
 - **Transcription + diarization:** Deepgram Nova-3 via `deepgram-sdk`. Single API call returns word/utterance timestamps plus speaker labels. `keyterm` parameter is fed the campaign roster so fantasy proper nouns come out correctly. `mip_opt_out=True` opts out of Deepgram's Model Improvement Program (no retention for training).
 - **Notes LLM:** `gemini-2.5-flash` via `google-genai`. Structured output via Pydantic `response_schema=SessionNotes`. 1M-token context — the whole transcript fits in a single shot, no chunking machinery.
-- **Audio:** `sounddevice` for capture. BlackHole 2ch for Discord, optional secondary mic stream mixed in for the local player.
+- **Audio:** Bundled Swift helper `pp-system-audio` (in `native/macos/pp-system-audio/`) wraps Core Audio Process Taps (macOS 14.2+) and streams mono float32 PCM over stdout to the Python parent. `sounddevice` still handles the optional secondary mic. BlackHole 2ch supported as a silent fallback when the helper is unavailable or the user denies the Audio Capture permission.
 - **Backend:** FastAPI + websockets. Served by uvicorn in a background thread.
 - **Frontend:** Vanilla HTML/CSS/JS. No build step. Dark D&D-adjacent theme.
 - **Window:** pywebview native frameless macOS window.
@@ -38,7 +38,7 @@ Cloud-backed D&D session scribe for macOS. Captures Discord audio via BlackHole,
 
 **Live session:** audio-only.
 ```
-BlackHole + mic → AudioCapture → AudioBuffer (30s WAV chunks) → disk
+System Audio (pp-system-audio) + mic → AudioCapture → AudioBuffer (30s WAV chunks) → disk
 ```
 No transcription happens during capture — chunk files accumulate on disk. Every `notes.update_interval` seconds (default 900 = 15 min), a preview cycle runs:
 ```
@@ -73,7 +73,7 @@ source .venv/bin/activate
 python run.py                 # opens native window
 ```
 
-Prerequisites: BlackHole installed, Deepgram + Gemini API keys entered in Settings, an active campaign selected.
+Prerequisites: macOS 14.2+ (or BlackHole installed for the fallback path), Deepgram + Gemini API keys entered in Settings, an active campaign selected. The first session start prompts for the Audio Capture permission.
 
 ## Build + release checklist
 
@@ -94,7 +94,7 @@ At the end of a dev session, run the `/notes` slash command to write a session n
 - **Rosetta detection.** `sysctl -n machdep.cpu.brand_string` is the correct check, not `uname -m` (which lies under Rosetta). Don't "simplify" this.
 - **pywebview frameless window.** `frameless=True, easy_drag=False` + topbar-scoped drag monkey-patch in `run.py`. Changing frameless breaks the unified titlebar look.
 - **Don't try `-webkit-app-region: drag` in CSS.** WKWebView ignores it — it's an Electron-only feature. The correct pattern is the `performWindowDragWithEvent_` monkey-patch in `run.py`.
-- **The `mic` stream mixes into the BlackHole stream.** If you refactor audio, preserve the thread-safe buffer + clipping in `AudioCapture`. Length mismatches between streams are expected.
+- **The `mic` stream mixes into the primary system-audio stream.** If you refactor audio, preserve the thread-safe buffer + clipping in `AudioCapture`. Length mismatches between streams are expected. The mixing closure was unit-tested in `tests/test_audio_mixing.py` — keep it green.
 - **Campaign roster file format is the contract.** UI and backend both round-trip through `Campaign.model_validate_json`. Adding a field is safe (Pydantic tolerates extras in older files); renaming or removing one will break saved campaigns.
 
 ## File layout (at-a-glance)
@@ -104,10 +104,12 @@ src/
   app.py                         # FastAPI routes + websockets + state
   cloud_config.py                # Deepgram/Gemini API key storage (.env in Application Support)
   audio/
-    capture.py                   # Dual-source mixing (BlackHole + mic)
+    capture.py                   # Dual-source mixing (system audio + mic), with BlackHole fallback
     buffer.py                    # 30s WAV chunk accumulator
     devices.py                   # Enumeration, loopback detection
-    backends/{macos,windows}.py
+    macos_helper.py              # Locate + probe the pp-system-audio helper binary
+    backends/{macos,macos_system,windows}.py
+native/macos/pp-system-audio/    # Swift helper — Core Audio Process Tap, stdout PCM stream
   campaign/
     models.py                    # Pydantic: Campaign, CampaignCharacter, NPC, Location, PlotThread, State
     storage.py                   # Per-campaign JSON files + active-campaign pointer + session merge

@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Passive Perception"
 BUNDLE_ID="com.passiveperception.app"
-VERSION="2.0.1"
+VERSION="2.1.0"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
@@ -76,13 +76,15 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.2</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>
     <false/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Passive Perception needs microphone access to capture audio from your D&amp;D sessions for transcription.</string>
+    <string>Passive Perception needs microphone access to capture your voice as the local player.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Passive Perception captures system audio (Discord, video calls) so it can transcribe your D&amp;D session.</string>
 </dict>
 </plist>
 PLIST
@@ -163,8 +165,7 @@ if [ ! -d "$VENV_DIR" ]; then
 
 This is your first launch. The app needs to install:
 • Python 3.11 (via Homebrew + pyenv)
-• ML models for speech recognition
-• BlackHole audio driver
+• Python packages for transcription and note-taking
 
 This will take 5–10 minutes and requires an internet connection." || exit 0
 
@@ -209,30 +210,9 @@ This will take 5–10 minutes and requires an internet connection." || exit 0
   kill_progress "$PROGRESS_PID"
   log "Dependencies installed"
 
-  # ── BlackHole ────────────────────────────────────────────────────────────
-  if ! ls /Library/Audio/Plug-Ins/HAL/ 2>/dev/null | grep -qi "blackhole"; then
-    log "Installing BlackHole..."
-    notify "Installing BlackHole audio driver..."
-    brew install blackhole-2ch >> "$LOG_FILE" 2>&1
-
-    osascript << 'BHDIALOG'
-      display dialog "BlackHole audio driver has been installed!
-
-To capture Discord audio, you need to create a Multi-Output Device:
-
-1. Open Audio MIDI Setup (Applications → Utilities)
-2. Click '+' at bottom-left → Create Multi-Output Device
-3. Check both your headphones AND BlackHole 2ch
-4. Right-click it → Use This Device For Sound Output
-5. In Discord: Output Device → Multi-Output Device" with title "Passive Perception — Audio Setup" buttons {"Open Audio MIDI Setup", "I'll Do This Later"} default button "I'll Do This Later"
-BHDIALOG
-    if [ $? -eq 0 ]; then
-      BUTTON=$(osascript -e 'button returned of (display dialog "BlackHole audio driver has been installed!" with title "test" buttons {"Open Audio MIDI Setup", "Later"} default button "Later")' 2>/dev/null)
-      if [ "$BUTTON" = "Open Audio MIDI Setup" ]; then
-        open "/Applications/Utilities/Audio MIDI Setup.app"
-      fi
-    fi
-  fi
+  # Native macOS system audio capture (Core Audio Process Taps, 14.2+).
+  # No driver install required — macOS will ask permission to capture audio
+  # the first time the user starts a recording.
 
   notify "Setup complete! Launching Passive Perception..."
   log "Setup complete"
@@ -276,8 +256,9 @@ source "$VENV_DIR/bin/activate"
 
 # Cloud backend — no local ML binaries (ffmpeg / ollama / whisper models) needed.
 # Deepgram (transcription+diarization) and Gemini (notes) are accessed over
-# HTTPS; the only runtime requirement beyond Python deps is BlackHole for
-# audio capture, which is installed during first-run setup.
+# HTTPS; system audio is captured natively via the bundled pp-system-audio
+# helper (Core Audio Process Taps, macOS 14.2+). BlackHole still works as a
+# fallback if installed — see src/audio/capture.py.
 
 # Run from a writable CWD. The config declares `./sessions` and `./tmp` as
 # relative paths, and the app bundle under /Applications is read-only on a
@@ -293,6 +274,25 @@ python "$APP_DIR/run.py" >> "$LOG_FILE" 2>&1
 LAUNCHER
 
 chmod +x "$APP_DIR/Contents/MacOS/launcher"
+
+# ── Native helper (system audio capture) ────────────────────────────────────
+# Compiles the Swift Core Audio Process Tap helper used to replace BlackHole.
+# Lives in Contents/MacOS/ alongside the launcher so `codesign --deep` picks
+# it up; we also sign it explicitly below for inside-out signing clarity.
+info "Building native system-audio helper..."
+HELPER_SRC="native/macos/pp-system-audio"
+(
+  cd "$HELPER_SRC"
+  swift build -c release --arch arm64
+)
+HELPER_BIN="$HELPER_SRC/.build/release/pp-system-audio"
+if [ ! -x "$HELPER_BIN" ]; then
+  echo "ERROR: pp-system-audio binary not produced at $HELPER_BIN" >&2
+  exit 1
+fi
+cp "$HELPER_BIN" "$APP_DIR/Contents/MacOS/pp-system-audio"
+chmod +x "$APP_DIR/Contents/MacOS/pp-system-audio"
+info "Helper installed at Contents/MacOS/pp-system-audio"
 
 # ── Entitlements ───────────────────────────────────────────────────────────
 # Hardened-runtime exceptions for Python (JIT, unsigned C extensions, pyenv
@@ -327,6 +327,12 @@ if [ -n "$APPLE_DEVELOPER_ID" ]; then
     --entitlements "$ENTITLEMENTS" \
     --sign "$APPLE_DEVELOPER_ID" \
     "$APP_DIR/Contents/MacOS/launcher"
+
+  # Sign the native helper alongside the launcher (same entitlements).
+  codesign --force --timestamp --options runtime \
+    --entitlements "$ENTITLEMENTS" \
+    --sign "$APPLE_DEVELOPER_ID" \
+    "$APP_DIR/Contents/MacOS/pp-system-audio"
 
   # Sign the .app bundle itself
   codesign --force --timestamp --options runtime --deep \

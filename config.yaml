@@ -1,5 +1,9 @@
 audio:
-  device: "BlackHole 2ch"      # auto-detected if this exact name is found
+  # "system_audio" → native macOS Core Audio Process Tap (macOS 14.2+).
+  # Falls back to BlackHole 2ch automatically if the OS / helper is unavailable
+  # or the user denies Audio Capture permission. To force the legacy BlackHole
+  # path explicitly (e.g. for Multi-Output Device setups), set "BlackHole 2ch".
+  device: "system_audio"
   chunk_duration: 30           # seconds per WAV chunk on disk
   sample_rate: 16000
   channels: 1

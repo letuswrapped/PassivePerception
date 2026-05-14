@@ -438,14 +438,14 @@ class SessionManager:
             self._diar_version += 1
 
             # Guard: no speech detected → skip the labeling dance entirely.
-            # The most common cause is audio not actually flowing through BlackHole
-            # (Discord output not routed to a Multi-Output Device that includes
-            # BlackHole), so every chunk is silence.
+            # Most common cause is silent capture: Audio Capture permission
+            # was denied (native path) or Discord output isn't routed through
+            # a Multi-Output Device with BlackHole 2ch (legacy path).
             if not self._canonical_transcript:
                 logger.warning("Transcription returned zero utterances — no speech detected")
                 self._progress_message = (
-                    "No speech detected. Check that Discord output is routed to "
-                    "a Multi-Output Device that includes BlackHole 2ch."
+                    "No speech detected. Check System Settings → Privacy & Security "
+                    "→ Audio Capture for Passive Perception, and confirm Discord isn't muted."
                 )
                 self._state = SessionState.IDLE
                 return
