@@ -341,6 +341,10 @@
         <div class="form-field"><label>System</label><input type="text" id="ce-system"></div>
       </div>
       <div class="form-field"><label>Setting (optional)</label><input type="text" id="ce-setting"></div>
+      <div class="form-field">
+        <label>Campaign overview <span class="field-hint inline">— premise, arc, what's at stake. Set once and forget.</span></label>
+        <textarea id="ce-overview" rows="4" placeholder="e.g. The party is exploring the jungles of Chult chasing a death curse caused by a stolen artifact. Stakes: every resurrected soul in the world is dying again."></textarea>
+      </div>
 
       <h3 class="section-header">Your character</h3>
       <div class="form-grid-2">
@@ -373,10 +377,20 @@
       <div id="ce-plot-list" class="entity-list"></div>
 
       <h3 class="section-header">Campaign state</h3>
+      <p class="small muted">Auto-updated after every session — edit here if Gemini's framing of the last session needs a nudge.</p>
       <div class="form-field"><label>Recap summary (last time on…)</label><textarea id="ce-state-summary" rows="3"></textarea></div>
+      <div class="form-field">
+        <label>Key events from last session <span class="field-hint inline">— one per line, 3–5 punchy bullets</span></label>
+        <textarea id="ce-state-headlines" rows="4" placeholder="Defeated the goblin scouts at the bridge&#10;Met Volo at the Yawning Portal&#10;Learned the artifact is hidden in Omu"></textarea>
+      </div>
       <div class="form-grid-2">
         <div class="form-field"><label>Current location</label><input type="text" id="ce-state-location"></div>
         <div class="form-field"><label>Planned next steps</label><input type="text" id="ce-state-next"></div>
+      </div>
+      <div class="form-field"><label>Party status <span class="field-hint inline">— HP, resources, conditions worth remembering</span></label><textarea id="ce-state-party-status" rows="2"></textarea></div>
+      <div class="form-field">
+        <label>Unresolved hooks <span class="field-hint inline">— one per line</span></label>
+        <textarea id="ce-state-hooks" rows="4" placeholder="Who tipped off the Zhentarim about our route?&#10;What is Volo hiding about the Spellplague?"></textarea>
       </div>
 
       <div class="form-actions-row">
@@ -389,6 +403,6 @@
   <div id="toast" class="toast hidden"></div>
 
 </div>
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>

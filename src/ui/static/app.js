@@ -821,13 +821,14 @@ function blankCampaign() {
     name: '',
     system: 'D&D 5e',
     setting: '',
+    overview: '',
     player: { name: '', role: 'player', race: '', char_class: '', subclass: '', multi_class: '', multi_subclass: '', pronouns: '', description: '', backstory: '', goals: '', notes: '' },
     perspective_notes: '',
     party: [],
     npcs: [],
     locations: [],
     plot_threads: [],
-    state: { summary: '', current_location: '', party_status: '', immediate_next_steps: '', unresolved_hooks: [] },
+    state: { summary: '', current_location: '', party_status: '', immediate_next_steps: '', unresolved_hooks: [], headline_events: [] },
     pending_session_brief: '',
     session_ids: [],
   };
@@ -858,6 +859,7 @@ function paintCampaignEditor(c) {
   $('ce-name').value = c.name || '';
   $('ce-system').value = c.system || '';
   $('ce-setting').value = c.setting || '';
+  $('ce-overview').value = c.overview || '';
 
   const p = c.player || {};
   $('ce-player-name').value = p.name || '';
@@ -877,8 +879,11 @@ function paintCampaignEditor(c) {
   paintEntityList('ce-plot-list', c.plot_threads || [], plotFields(), 'plot_threads');
 
   $('ce-state-summary').value = c.state?.summary || '';
+  $('ce-state-headlines').value = (c.state?.headline_events || []).join('\n');
   $('ce-state-location').value = c.state?.current_location || '';
   $('ce-state-next').value = c.state?.immediate_next_steps || '';
+  $('ce-state-party-status').value = c.state?.party_status || '';
+  $('ce-state-hooks').value = (c.state?.unresolved_hooks || []).join('\n');
 
   $('ce-delete').style.display = c.id ? '' : 'none';
 }
@@ -959,6 +964,7 @@ function collectCampaignFromEditor() {
   c.name = $('ce-name').value.trim();
   c.system = $('ce-system').value.trim();
   c.setting = $('ce-setting').value.trim();
+  c.overview = $('ce-overview').value.trim();
 
   c.player = c.player || {};
   c.player.name = $('ce-player-name').value.trim();
@@ -991,9 +997,15 @@ function collectCampaignFromEditor() {
   c.state.summary = $('ce-state-summary').value.trim();
   c.state.current_location = $('ce-state-location').value.trim();
   c.state.immediate_next_steps = $('ce-state-next').value.trim();
-  c.state.unresolved_hooks = c.state.unresolved_hooks || [];
+  c.state.party_status = $('ce-state-party-status').value.trim();
+  c.state.headline_events = splitLines($('ce-state-headlines').value).slice(0, 5);
+  c.state.unresolved_hooks = splitLines($('ce-state-hooks').value).slice(0, 20);
 
   return c;
+}
+
+function splitLines(text) {
+  return (text || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
 async function saveCampaignFromEditor() {

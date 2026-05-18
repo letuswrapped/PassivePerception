@@ -75,6 +75,7 @@ class CampaignState(BaseModel):
     party_status: str = ""               # HP, resources, conditions worth remembering
     immediate_next_steps: str = ""        # what the party had planned to do next
     unresolved_hooks: list[str] = Field(default_factory=list)
+    headline_events: list[str] = Field(default_factory=list)   # 3–5 punchy "what happened" bullets from the last session; overwritten each merge
 
 
 class Campaign(BaseModel):
@@ -83,6 +84,7 @@ class Campaign(BaseModel):
     name: str                             # human display name
     system: str = "D&D 5e"                # game system — flavor for the LLM
     setting: str = ""                     # world/setting name + blurb
+    overview: str = ""                    # paragraph-form premise: what is this campaign about, arc, what's at stake
 
     player: CampaignCharacter             # THE USER — notes are geared toward this character
     perspective_notes: str = ""           # free-form: "emphasize clues related to X", "I care about faction politics", etc.

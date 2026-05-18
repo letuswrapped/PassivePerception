@@ -130,21 +130,41 @@ def _plot_threads_block(campaign: Campaign) -> str:
     return "\n".join(lines)
 
 
+def _overview_block(campaign: Campaign) -> str:
+    text = (campaign.overview or "").strip()
+    if not text:
+        return ""
+    return f"## Campaign overview\n{text}"
+
+
 def _state_block(campaign: Campaign) -> str:
     s = campaign.state
-    if not any([s.summary, s.current_location, s.immediate_next_steps, s.unresolved_hooks]):
+    if not any([s.summary, s.current_location, s.immediate_next_steps, s.unresolved_hooks, s.headline_events, s.party_status]):
         return ""
-    lines = ["Last time on this campaign:"]
+    lines = ["## Story so far — last session"]
     if s.summary:
-        lines.append(f"  - Recap: {s.summary}")
+        lines.append(s.summary)
+    if s.headline_events:
+        lines.append("")
+        lines.append("### Key events")
+        for ev in s.headline_events[:5]:
+            lines.append(f"  - {ev}")
+    details = []
     if s.current_location:
-        lines.append(f"  - Last location: {s.current_location}")
+        details.append(f"  - Last location: {s.current_location}")
+    if s.party_status:
+        details.append(f"  - Party status: {s.party_status}")
     if s.immediate_next_steps:
-        lines.append(f"  - Planned next: {s.immediate_next_steps}")
+        details.append(f"  - Planned next: {s.immediate_next_steps}")
+    if details:
+        lines.append("")
+        lines.append("### Where things stand")
+        lines.extend(details)
     if s.unresolved_hooks:
-        lines.append("  - Open hooks:")
+        lines.append("")
+        lines.append("### Open hooks")
         for h in s.unresolved_hooks[:10]:
-            lines.append(f"      • {h}")
+            lines.append(f"  - {h}")
     return "\n".join(lines)
 
 
@@ -162,6 +182,11 @@ def build_system_prompt(campaign: Campaign | None) -> str:
     parts = [_BASE_SYSTEM, "", "=== CAMPAIGN CONTEXT ===", f"Campaign: {campaign.name} ({campaign.system})"]
     if campaign.setting:
         parts.append(f"Setting: {campaign.setting}")
+
+    overview = _overview_block(campaign)
+    if overview:
+        parts.append("")
+        parts.append(overview)
 
     parts.append("")
     parts.append("The player you are writing for:")

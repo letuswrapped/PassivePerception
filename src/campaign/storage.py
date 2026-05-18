@@ -205,6 +205,9 @@ def merge_session_into_campaign(
         )
         existing_plot_summaries.add(key)
 
+    # Top plot points become "key events" for the next session's prompt — last-1 only, overwrite each merge.
+    headline_events = [p.summary.strip() for p in notes.plot_points if p.summary.strip()][:5]
+
     # Update running state
     campaign.state = CampaignState(
         summary=notes.summary or campaign.state.summary,
@@ -214,6 +217,7 @@ def merge_session_into_campaign(
         unresolved_hooks=list(dict.fromkeys(
             [*campaign.state.unresolved_hooks, *notes.open_questions]
         ))[:20],  # cap so this doesn't grow forever
+        headline_events=headline_events or campaign.state.headline_events,
     )
 
     if session_id and session_id not in campaign.session_ids:
