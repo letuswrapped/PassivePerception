@@ -451,16 +451,30 @@ async def resume_session(session_id: str):
 
 @app.get("/system/open-midi-setup")
 async def open_midi_setup():
+    # macOS 15+ moved Audio MIDI Setup under /System/Applications/Utilities/.
+    # `open -a` resolves by app name regardless of path, which is the most
+    # robust form across OS versions.
     import subprocess
-    subprocess.Popen(["open", "/Applications/Utilities/Audio MIDI Setup.app"])
+    subprocess.Popen(["open", "-a", "Audio MIDI Setup"])
+    return {"ok": True}
+
+
+@app.get("/system/open-screen-recording-privacy")
+async def open_screen_recording_privacy():
+    # ScreenCaptureKit (the SCK helper mode) requires the Screen Recording
+    # permission, not Audio Capture. Deep-link the user there directly.
+    import subprocess
+    subprocess.Popen([
+        "open",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ])
     return {"ok": True}
 
 
 @app.get("/system/open-audio-privacy")
 async def open_audio_privacy():
-    # Deep-link to the Audio Capture (Process Tap) privacy pane. The same
-    # URL works for Audio Capture on macOS 14.2+; on older systems it falls
-    # back to the parent Privacy & Security pane.
+    # Legacy Audio Capture pane (used by the older `system` Process Tap mode).
+    # Kept for the fallback path.
     import subprocess
     subprocess.Popen([
         "open",

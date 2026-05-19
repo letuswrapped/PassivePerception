@@ -85,6 +85,8 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <string>Passive Perception needs microphone access to capture your voice as the local player.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Passive Perception captures system audio (Discord, video calls) so it can transcribe your D&amp;D session.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Passive Perception uses ScreenCaptureKit to capture system audio (Discord, video calls) for transcription. No screen content is recorded or transmitted.</string>
 </dict>
 </plist>
 PLIST

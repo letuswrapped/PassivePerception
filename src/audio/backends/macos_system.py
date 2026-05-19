@@ -1,14 +1,22 @@
 """
 Native macOS system audio capture via the pp-system-audio Swift helper.
 
-The helper wraps Core Audio Process Taps (macOS 14.2+) and streams mono
-float32 PCM to stdout. This backend spawns the helper, parses its header,
-and pumps frames through the standard AudioCaptureBackend callback contract.
+The helper supports two backends, selected at launch with `--mode`:
 
-No BlackHole virtual audio device required. The Audio Capture permission
-(NSAudioCaptureUsageDescription) is granted by the user on first session
-start; the helper triggers TCC the first time it calls
-AudioHardwareCreateProcessTap.
+  - `sck`    — ScreenCaptureKit (macOS 13+). Apple's modern, reliable API for
+               system audio capture. Used by QuickTime, OBS, Loom. Requires
+               Screen Recording permission (NSScreenCaptureUsageDescription).
+               This is the default — it works on macOS 15+/26 where the
+               legacy Process Tap path is broken.
+
+  - `system` — Legacy Core Audio Process Tap (macOS 14.2+). Kept as a
+               fallback for environments where SCK isn't usable; broken on
+               macOS 15+/26 (the IOProc never fires).
+
+Either mode emits the same stdout contract: a "PP1 rate=N ch=1 fmt=f32le"
+header followed by mono float32 PCM.
+
+No BlackHole virtual audio device required.
 """
 
 from __future__ import annotations
@@ -51,18 +59,22 @@ _BYTES_PER_SAMPLE = 4
 
 
 class MacOSSystemAudioBackend(AudioCaptureBackend):
-    """Reads mono float32 PCM from the Swift Process Tap helper subprocess."""
+    """Reads mono float32 PCM from the pp-system-audio Swift helper."""
 
-    # If the tap reports success at the API level (header emitted, IOProc
-    # registered, AudioDeviceStart returns noErr) but produces zero audio
-    # bytes within this window, treat the backend as broken and raise
-    # SystemAudioUnavailable so AudioCapture falls through to BlackHole. This
-    # is the failure mode we hit on macOS 15+/26 — the aggregate device claims
-    # to be running but the IOProc never fires.
+    # If the helper reports success at the API level but produces zero audio
+    # bytes within this window, treat the backend as broken and try the next
+    # mode (or raise SystemAudioUnavailable to trigger the BlackHole fallback
+    # of last resort). This catches the macOS 15+/26 Process Tap regression
+    # where AudioDeviceStart returns noErr but the IOProc never fires.
     _WATCHDOG_SECONDS = 3.0
 
+    # Helper mode preference order. SCK first because it's the only path that
+    # works reliably on macOS 15+/26. The legacy `system` (Core Audio Process
+    # Tap) mode is retained for older macOS where SCK isn't permitted.
+    _MODE_PREFERENCE = ("sck", "system")
+
     def __init__(self, device_name: str = "system_audio", target_rate: int = TARGET_RATE) -> None:
-        self._device_name = "System Audio (Process Tap)"
+        self._device_name = "System Audio"
         self._target_rate = target_rate
         self._running = False
         self._helper_proc: subprocess.Popen | None = None
@@ -73,6 +85,7 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
         self._up = 1
         self._down = 1
         self._bytes_received = 0
+        self._active_mode: str | None = None
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -84,10 +97,39 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
                 "or built from source."
             )
         helper = locate_system_audio_helper()
-        logger.info("[audio/macos-system] launching helper: %s", helper)
+
+        # Try each helper mode in preference order. SCK is the working path
+        # on macOS 15+/26; `system` (Core Audio Process Tap) is kept only as
+        # a fallback for older macOS where SCK isn't usable.
+        last_exc: SystemAudioUnavailable | None = None
+        for mode in self._MODE_PREFERENCE:
+            try:
+                self._start_in_mode(mode, helper, callback)
+                self._active_mode = mode
+                self._device_name = f"System Audio ({mode.upper()})"
+                logger.info("[audio/macos-system] capture active via mode=%s", mode)
+                return
+            except SystemAudioUnavailable as exc:
+                last_exc = exc
+                logger.warning(
+                    "[audio/macos-system] mode=%s failed: %s — trying next mode.",
+                    mode, exc,
+                )
+        # All modes failed — let AudioCapture decide whether BlackHole is
+        # available as a last-resort fallback.
+        assert last_exc is not None
+        raise last_exc
+
+    def _start_in_mode(
+        self, mode: str, helper, callback: Callable[[np.ndarray], None],
+    ) -> None:
+        logger.info("[audio/macos-system] launching helper: %s --mode %s", helper, mode)
+        # Reset per-attempt state.
+        self._bytes_received = 0
+        self._stop_event = threading.Event()
 
         proc = subprocess.Popen(
-            [str(helper), "--mode", "system"],
+            [str(helper), "--mode", mode],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
@@ -111,16 +153,19 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
                 proc.kill()
             stderr_text = stderr_data.decode("utf-8", "replace").strip()
             if proc.returncode == 1:
+                # Permission denied. For SCK that's Screen Recording; for the
+                # legacy tap path that's Audio Capture.
+                perm_label = "Screen Recording" if mode == "sck" else "Audio Capture"
                 raise SystemAudioUnavailable(
-                    "Audio Capture permission denied. Open System Settings → "
-                    "Privacy & Security → Audio Capture and enable Passive Perception."
+                    f"{perm_label} permission denied. Open System Settings → "
+                    f"Privacy & Security → {perm_label} and enable Passive Perception."
                 )
             if proc.returncode == 2:
                 raise SystemAudioUnavailable(
-                    "macOS 14.2 or later is required for native system audio capture."
+                    "macOS version too old for this capture mode."
                 )
             raise SystemAudioUnavailable(
-                f"pp-system-audio exited before emitting header "
+                f"pp-system-audio --mode {mode} exited before emitting header "
                 f"(rc={proc.returncode}). stderr: {stderr_text}"
             )
 
@@ -141,8 +186,8 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
         self._up = self._target_rate // g
         self._down = self._native_rate // g
         logger.info(
-            "[audio/macos-system] native=%dHz mono → resample to %dHz",
-            self._native_rate, self._target_rate,
+            "[audio/macos-system] mode=%s native=%dHz mono → resample to %dHz",
+            mode, self._native_rate, self._target_rate,
         )
 
         self._stop_event.clear()
@@ -151,46 +196,54 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
         self._reader_thread = threading.Thread(
             target=self._capture_loop,
             args=(callback,),
-            name="pp-audio-macos-system",
+            name=f"pp-audio-macos-{mode}",
             daemon=True,
         )
         self._reader_thread.start()
 
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr,
-            name="pp-audio-macos-system-stderr",
+            name=f"pp-audio-macos-{mode}-stderr",
             daemon=True,
         )
         self._stderr_thread.start()
 
-        # Watchdog — confirm audio actually flows. On macOS 15+/26 the tap
-        # silently produces no buffers, so we have to verify by data, not by
-        # API return codes. If nothing in 3s, tear down and let the caller
-        # fall back to BlackHole.
+        # Watchdog — confirm audio actually flows. The SCK path is reliable
+        # but kept for parity (e.g. tap failure on macOS 15+/26 where it
+        # reports success but produces nothing).
         import time
         deadline = time.monotonic() + self._WATCHDOG_SECONDS
         while time.monotonic() < deadline:
             if self._bytes_received > 0:
                 logger.info(
-                    "[audio/macos-system] watchdog passed: %d bytes received within %.1fs",
-                    self._bytes_received, self._WATCHDOG_SECONDS,
+                    "[audio/macos-system] mode=%s watchdog passed: %d bytes within %.1fs",
+                    mode, self._bytes_received, self._WATCHDOG_SECONDS,
                 )
                 return
+            # If the helper died early (e.g. permission denied mid-stream),
+            # short-circuit instead of waiting out the watchdog.
+            if proc.poll() is not None:
+                stderr_text = ""
+                if proc.stderr is not None:
+                    try:
+                        stderr_text = proc.stderr.read().decode("utf-8", "replace").strip()
+                    except Exception:
+                        pass
+                raise SystemAudioUnavailable(
+                    f"pp-system-audio --mode {mode} exited early "
+                    f"(rc={proc.returncode}). stderr: {stderr_text}"
+                )
             time.sleep(0.1)
         logger.warning(
-            "[audio/macos-system] watchdog timeout: 0 bytes in %.1fs — "
-            "Process Tap is not delivering audio (known macOS 15+/26 issue). "
-            "Tearing down so AudioCapture can fall back.",
-            self._WATCHDOG_SECONDS,
+            "[audio/macos-system] mode=%s watchdog timeout: 0 bytes in %.1fs",
+            mode, self._WATCHDOG_SECONDS,
         )
-        # Best-effort teardown before raising.
+        # Best-effort teardown before raising so the next mode can be tried.
         self._stop_event.set()
         self._running = False
         self._terminate_helper()
         raise SystemAudioUnavailable(
-            f"Native system audio capture produced no data in {self._WATCHDOG_SECONDS}s. "
-            "This is a known macOS 15+/26 issue with Core Audio process taps. "
-            "Falling back to BlackHole."
+            f"mode={mode} produced no data in {self._WATCHDOG_SECONDS}s."
         )
 
     def stop(self) -> None:

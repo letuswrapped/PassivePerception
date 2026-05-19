@@ -14,7 +14,7 @@ func elog(_ message: String) {
 }
 
 func usage() {
-    elog("usage: pp-system-audio --mode system | --check-permission | --check-os")
+    elog("usage: pp-system-audio --mode sck | --mode system | --check-permission | --check-os")
 }
 
 // stdout pipes can break if the parent (Python) goes away. Without this,
@@ -60,15 +60,31 @@ case "--check-permission":
     }
 
 case "--mode":
-    guard args.count >= 3, args[2] == "system" else {
+    guard args.count >= 3 else {
         usage()
         exit(EXIT_BAD_ARGS)
     }
-    if #available(macOS 14.2, *) {
-        runSystemCapture(shouldStopRef: { shouldStop })
-    } else {
-        elog("Core Audio Process Taps require macOS 14.2 or later.")
-        exit(EXIT_UNSUPPORTED_OS)
+    switch args[2] {
+    case "sck":
+        // ScreenCaptureKit path — modern, reliable, macOS 13+.
+        if #available(macOS 13.0, *) {
+            runSCKCapture(shouldStopRef: { shouldStop })
+        } else {
+            elog("ScreenCaptureKit requires macOS 13.0 or later.")
+            exit(EXIT_UNSUPPORTED_OS)
+        }
+    case "system":
+        // Legacy Core Audio Process Tap path — kept for older macOS where the
+        // SCK path may not be available, and as an A/B test channel.
+        if #available(macOS 14.2, *) {
+            runSystemCapture(shouldStopRef: { shouldStop })
+        } else {
+            elog("Core Audio Process Taps require macOS 14.2 or later.")
+            exit(EXIT_UNSUPPORTED_OS)
+        }
+    default:
+        usage()
+        exit(EXIT_BAD_ARGS)
     }
 
 default:

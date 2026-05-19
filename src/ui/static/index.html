@@ -79,8 +79,9 @@
 
         <div class="onboarding-step hidden" data-step="2">
           <h1>Audio Setup</h1>
-          <p class="muted">Passive Perception captures Discord and any other system audio directly — no virtual audio device or Multi-Output configuration required. The first time you start a recording, macOS will ask permission to capture system audio. Click <strong>Allow</strong>.</p>
-          <p class="muted small">macOS 14.2 or later. Already have BlackHole installed? It still works as a fallback if you prefer.</p>
+          <p class="muted">Passive Perception captures Discord and any other system audio directly — no virtual audio device or Multi-Output configuration required.</p>
+          <p class="muted">The first time you start a recording, macOS will ask for <strong>Screen Recording</strong> permission. Click <strong>Allow</strong>. We only use it for the system-audio side of ScreenCaptureKit — no screen content is recorded or transmitted.</p>
+          <p class="muted small">macOS 13 or later. Already have BlackHole installed? It still works as a fallback if the SCK path is unavailable.</p>
           <div class="onboarding-nav">
             <button class="btn-ghost" data-action="back">Back</button>
             <button class="btn-primary" data-action="next">Done</button>
