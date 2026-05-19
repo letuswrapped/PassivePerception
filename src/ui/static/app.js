@@ -191,6 +191,11 @@ async function onStatusChanged(prev, curr) {
   if (curr === 'stopping' || curr === 'processing_pass1' || curr === 'processing_pass2' || curr === 'awaiting_labels') {
     state.sawPostRecording = true;
   }
+  // Cache the last non-empty progress so a bail-out error message that gets
+  // cleared by the next poll still triggers the error toast on idle.
+  if (state.session.progress) {
+    state.lastProgress = state.session.progress;
+  }
 
   if (curr === 'running') {
     if (state.view !== 'view-live') showView('view-live');
@@ -229,7 +234,8 @@ async function onStatusChanged(prev, curr) {
     // Distinguish a successful finish (notes available) from a bail-out
     // (backend put a human-readable progress_message). The bail-out path
     // returns to home with a toast; success opens the notes view.
-    const progress = (state.session.progress || '').trim();
+    const progress = ((state.session.progress || state.lastProgress) || '').trim();
+    state.lastProgress = '';
     const looksLikeError = /no audio|failed|error|no speech/i.test(progress);
     if (looksLikeError) {
       toast(progress, 'error');
