@@ -32,9 +32,27 @@ func runSystemCapture(shouldStopRef: @escaping () -> Bool) {
     }
 
     // Idle the main thread until a stop signal is received. IO callbacks
-    // happen on Core Audio's HAL thread; the main thread just polls.
+    // happen on Core Audio's HAL thread; the main thread polls and emits a
+    // diagnostic heartbeat every 5s so silent IOProc failures are visible.
+    var lastHeartbeat = Date()
+    var lastBytes: UInt64 = 0
+    var lastFires: UInt64 = 0
     while !shouldStopRef() {
         Thread.sleep(forTimeInterval: 0.1)
+        if Date().timeIntervalSince(lastHeartbeat) >= 5.0 {
+            let fires = tap.ioProcFireCount
+            let bytes = tap.bytesWritten
+            let dFires = fires &- lastFires
+            let dBytes = bytes &- lastBytes
+            if dFires == 0 {
+                elog("heartbeat: IOProc has NOT fired in the last 5s (total fires=\(fires), bytes=\(bytes)) — audio source may be silent or tap may be stalled")
+            } else {
+                elog("heartbeat: IOProc fired \(dFires) times in last 5s, +\(dBytes) bytes (total fires=\(fires), bytes=\(bytes))")
+            }
+            lastHeartbeat = Date()
+            lastFires = fires
+            lastBytes = bytes
+        }
     }
 
     tap.stop()
@@ -58,6 +76,12 @@ final class SystemAudioTap {
     private var sampleRate: Double = 48000
     private var channels: UInt32 = 2
     private let stdoutHandle = FileHandle.standardOutput
+
+    // Diagnostics — incremented from the HAL thread, read from the main
+    // thread for periodic heartbeats. Eventual consistency is fine; no lock.
+    fileprivate var ioProcFireCount: UInt64 = 0
+    fileprivate var bytesWritten: UInt64 = 0
+    fileprivate var firstFireLogged: Bool = false
 
     func start() throws {
         try createTap()
@@ -128,11 +152,23 @@ final class SystemAudioTap {
             )
         }
 
+        // Aggregate devices wrapping a tap need a REAL output device as the
+        // clock master, otherwise the IOProc never fires on macOS 15+ (the
+        // device starts cleanly, but no buffers ever arrive). On 14.2 an empty
+        // main sub-device worked because the tap self-clocked. We resolve the
+        // system's default output device UID and pin the aggregate to it.
+        let mainDeviceUID = (try? Self.copyDefaultOutputDeviceUID()) ?? ""
+        if mainDeviceUID.isEmpty {
+            elog("warning: no default output device UID available — aggregate may not clock")
+        } else {
+            elog("aggregate main sub-device: \(mainDeviceUID)")
+        }
+
         let aggregateUID = "com.passiveperception.system-audio.\(UUID().uuidString)"
         let dict: [String: Any] = [
             kAudioAggregateDeviceNameKey as String: "Passive Perception System Audio",
             kAudioAggregateDeviceUIDKey as String: aggregateUID,
-            kAudioAggregateDeviceMainSubDeviceKey as String: "",
+            kAudioAggregateDeviceMainSubDeviceKey as String: mainDeviceUID,
             kAudioAggregateDeviceIsPrivateKey as String: true,
             kAudioAggregateDeviceIsStackedKey as String: false,
             kAudioAggregateDeviceTapAutoStartKey as String: true,
@@ -153,6 +189,35 @@ final class SystemAudioTap {
             )
         }
         aggregateDeviceID = newAgg
+    }
+
+    // Resolve the UID of the current default output device. Used as the
+    // aggregate's main sub-device so the IOProc actually fires.
+    private static func copyDefaultOutputDeviceUID() throws -> String {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID: AudioObjectID = kAudioObjectUnknown
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID,
+        )
+        guard status == noErr, deviceID != kAudioObjectUnknown else { return "" }
+
+        var uidAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var cfUID: CFString = "" as CFString
+        var uidSize = UInt32(MemoryLayout<CFString>.size)
+        let uidStatus = withUnsafeMutablePointer(to: &cfUID) { ptr in
+            AudioObjectGetPropertyData(deviceID, &uidAddr, 0, nil, &uidSize, ptr)
+        }
+        guard uidStatus == noErr else { return "" }
+        return cfUID as String
     }
 
     private func readNativeFormat() throws {
@@ -218,6 +283,11 @@ final class SystemAudioTap {
     // per-callback payload (~2 KB @ 48 kHz mono), so it won't back up unless
     // the Python parent stalls — in which case SIGPIPE will tear us down.
     fileprivate func handleBuffer(_ bufferList: UnsafePointer<AudioBufferList>) {
+        ioProcFireCount &+= 1
+        if !firstFireLogged {
+            firstFireLogged = true
+            elog("IOProc fired for the first time — audio is flowing")
+        }
         let ablPtr = UnsafeMutableAudioBufferListPointer(
             UnsafeMutablePointer(mutating: bufferList)
         )
@@ -255,6 +325,7 @@ final class SystemAudioTap {
                             count: raw.count,
                             deallocator: .none)
             stdoutHandle.write(data)
+            bytesWritten &+= UInt64(raw.count)
         }
     }
 }

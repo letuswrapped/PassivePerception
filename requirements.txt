@@ -9,12 +9,11 @@ scipy>=1.11
 
 # Web server
 fastapi>=0.109
-uvicorn[standard]>=0.27
+uvicorn>=0.27          # plain — uvloop/httptools (the [standard] extras) aren't imported anywhere
 websockets>=12.0
 
 # Data models
 pydantic>=2.5
-pydantic-settings>=2.1
 
 # Config & env
 pyyaml>=6.0

@@ -102,7 +102,7 @@ divider
 echo ""
 echo -e "  ${GREEN}Setup complete!${NC}"
 echo ""
-echo "  Transcription and note generation use Deepgram and Gemini (cloud APIs)."
+echo "  Transcription and note generation run through cloud APIs."
 echo "  Add your API keys in Settings → API Keys the first time you launch."
 echo ""
 echo "  To start Passive Perception:"

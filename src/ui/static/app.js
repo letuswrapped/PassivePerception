@@ -183,6 +183,15 @@ async function onStatusChanged(prev, curr) {
   })[curr] || curr;
   setStatus(label, curr);
 
+  // Track whether we ever entered the post-recording pipeline since the last
+  // idle. The polling cadence (2s) can miss fast transitions through
+  // processing_pass1 when the backend bails early (no audio captured,
+  // transcription failure, zero utterances), leaving the UI stuck on
+  // "Stopping…". This flag lets us still react when curr goes idle.
+  if (curr === 'stopping' || curr === 'processing_pass1' || curr === 'processing_pass2' || curr === 'awaiting_labels') {
+    state.sawPostRecording = true;
+  }
+
   if (curr === 'running') {
     if (state.view !== 'view-live') showView('view-live');
     // Timer tick
@@ -215,9 +224,20 @@ async function onStatusChanged(prev, curr) {
     if (state.view !== 'view-live') showView('view-live');
   }
 
-  if (curr === 'idle' && (prev === 'processing_pass2' || prev === 'processing_pass1')) {
-    // Session just finished — show notes
-    await openNotesView();
+  if (curr === 'idle' && state.sawPostRecording) {
+    state.sawPostRecording = false;
+    // Distinguish a successful finish (notes available) from a bail-out
+    // (backend put a human-readable progress_message). The bail-out path
+    // returns to home with a toast; success opens the notes view.
+    const progress = (state.session.progress || '').trim();
+    const looksLikeError = /no audio|failed|error|no speech/i.test(progress);
+    if (looksLikeError) {
+      toast(progress, 'error');
+      $('live-progress').textContent = '';
+      await showHome();
+    } else {
+      await openNotesView();
+    }
   }
 }
 

@@ -208,16 +208,44 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
                 pass
 
     def _capture_loop(self, callback: Callable[[np.ndarray], None]) -> None:
+        import time
         from scipy.signal import resample_poly
 
         assert self._helper_proc is not None and self._helper_proc.stdout is not None
         stdout = self._helper_proc.stdout
         bytes_per_read = _FRAMES_PER_READ * _BYTES_PER_SAMPLE
+        # Heartbeat: log byte throughput every 10s so silent helper failures
+        # are visible in launcher.log instead of just "No audio chunks".
+        bytes_received = 0
+        chunks_read = 0
+        last_heartbeat = time.monotonic()
+        last_bytes = 0
         try:
             while not self._stop_event.is_set():
                 chunk = stdout.read(bytes_per_read)
                 if not chunk:
+                    logger.warning(
+                        "[audio/macos-system] EOF from helper after %d bytes (%d reads)",
+                        bytes_received, chunks_read,
+                    )
                     break  # EOF — helper exited
+                bytes_received += len(chunk)
+                chunks_read += 1
+                now = time.monotonic()
+                if now - last_heartbeat >= 10.0:
+                    delta = bytes_received - last_bytes
+                    if delta == 0:
+                        logger.warning(
+                            "[audio/macos-system] heartbeat: 0 bytes from helper in last 10s (total %d) — capture is stalled",
+                            bytes_received,
+                        )
+                    else:
+                        logger.info(
+                            "[audio/macos-system] heartbeat: +%d bytes in 10s (total %d)",
+                            delta, bytes_received,
+                        )
+                    last_heartbeat = now
+                    last_bytes = bytes_received
                 usable = len(chunk) - (len(chunk) % _BYTES_PER_SAMPLE)
                 if usable <= 0:
                     continue

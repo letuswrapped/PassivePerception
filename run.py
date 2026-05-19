@@ -106,12 +106,16 @@ def _emergency_save() -> None:
 
 def main() -> None:
     print("\n  Passive Perception — D&D Session Scribe")
-    check_prerequisites()
 
     # Register emergency save for unexpected exits
     atexit.register(_emergency_save)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # triggers atexit
     signal.signal(signal.SIGINT,  lambda *_: sys.exit(0))  # Ctrl+C / force quit
+
+    # Prereq probe (audio helper subprocess + .env load) runs concurrently with
+    # the server boot — its warnings are informational, not blocking. Saves the
+    # subprocess round-trip from the critical cold-start path.
+    threading.Thread(target=check_prerequisites, daemon=True).start()
 
     # Start server in background thread
     server_thread = threading.Thread(target=start_server, daemon=True)
