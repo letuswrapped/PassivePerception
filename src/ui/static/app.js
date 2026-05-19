@@ -642,7 +642,11 @@ function renderPlainTranscript(host, lines) {
 
 async function openArchives() {
   showView('view-archives');
+  // Re-entering archives (e.g. after a delete) must reset both panels —
+  // openArchiveDetail() hides the list, so coming back without unhiding it
+  // leaves the page blank.
   $('archives-detail').classList.add('hidden');
+  $('archives-list').classList.remove('hidden');
   try {
     const { sessions } = await api('/sessions');
     const list = $('archives-list');
