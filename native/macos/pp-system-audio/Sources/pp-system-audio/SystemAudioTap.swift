@@ -169,13 +169,32 @@ final class SystemAudioTap {
             kAudioAggregateDeviceNameKey as String: "Passive Perception System Audio",
             kAudioAggregateDeviceUIDKey as String: aggregateUID,
             kAudioAggregateDeviceMainSubDeviceKey as String: mainDeviceUID,
+            // Must be private. Public aggregates trigger
+            // kAudioHardwareUnknownPropertyError on stream-format read.
             kAudioAggregateDeviceIsPrivateKey as String: true,
             kAudioAggregateDeviceIsStackedKey as String: false,
+            // TapAutoStart MUST be true, otherwise the tap doesn't engage
+            // until something explicitly starts it, and the aggregate's
+            // stream format isn't queryable.
             kAudioAggregateDeviceTapAutoStartKey as String: true,
+            // Sub-device list provides the actual clock source. Naming a
+            // device via kAudioAggregateDeviceMainSubDeviceKey alone is not
+            // enough on macOS 15+ — the device also has to appear in the
+            // sub-device list, otherwise AudioDeviceStart succeeds but the
+            // device never enters the running state (IsRunning=0).
+            kAudioAggregateDeviceSubDeviceListKey as String: [
+                [
+                    kAudioSubDeviceUIDKey as String: mainDeviceUID,
+                ],
+            ],
             kAudioAggregateDeviceTapListKey as String: [
                 [
-                    kAudioSubTapUIDKey: tapUID,
-                    kAudioSubTapDriftCompensationKey: false,
+                    // Inner dict keys cast to String for consistent CFDictionary
+                    // bridging — without the casts the nested dict's keys can
+                    // round-trip as CFString and may not be recognized by the
+                    // tap-list reader on some macOS versions.
+                    kAudioSubTapUIDKey as String: tapUID,
+                    kAudioSubTapDriftCompensationKey as String: false,
                 ],
             ],
         ]
@@ -189,6 +208,7 @@ final class SystemAudioTap {
             )
         }
         aggregateDeviceID = newAgg
+        elog("aggregate created: id=\(aggregateDeviceID) uid=\(aggregateUID)")
     }
 
     // Resolve the UID of the current default output device. Used as the
@@ -265,6 +285,7 @@ final class SystemAudioTap {
             )
         }
         ioProcID = procID
+        elog("IOProc registered on aggregate device \(aggregateDeviceID)")
 
         let startStatus = AudioDeviceStart(aggregateDeviceID, procID)
         guard startStatus == noErr else {
@@ -273,6 +294,42 @@ final class SystemAudioTap {
                 message: "AudioDeviceStart failed (OSStatus=\(startStatus))."
             )
         }
+        elog("AudioDeviceStart returned noErr — device should now be producing samples")
+
+        // Query kAudioDevicePropertyDeviceIsRunning in BOTH scopes after a
+        // short delay (Start can be asynchronous on macOS 15+).
+        Thread.sleep(forTimeInterval: 0.5)
+        for (scopeName, scope) in [
+            ("Global", kAudioObjectPropertyScopeGlobal),
+            ("Input",  kAudioObjectPropertyScopeInput),
+            ("Output", kAudioObjectPropertyScopeOutput),
+        ] {
+            var isRunning: UInt32 = 0
+            var runningSize = UInt32(MemoryLayout<UInt32>.size)
+            var runningAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceIsRunning,
+                mScope: scope,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let runStatus = AudioObjectGetPropertyData(
+                aggregateDeviceID, &runningAddr, 0, nil, &runningSize, &isRunning,
+            )
+            elog("IsRunning[\(scopeName)]=\(isRunning) status=\(runStatus)")
+        }
+
+        // Also probe the tap itself for IsRunning and the aggregate's
+        // sub-device list (post-creation, to confirm the tap is registered).
+        var tapRunning: UInt32 = 0
+        var tapRunningSize = UInt32(MemoryLayout<UInt32>.size)
+        var tapRunningAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunning,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let tapRunStatus = AudioObjectGetPropertyData(
+            tapID, &tapRunningAddr, 0, nil, &tapRunningSize, &tapRunning,
+        )
+        elog("TapIsRunning=\(tapRunning) status=\(tapRunStatus)")
     }
 
     // ── IO proc body — runs on Core Audio's HAL thread ─────────────────────

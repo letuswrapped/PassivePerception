@@ -53,6 +53,14 @@ _BYTES_PER_SAMPLE = 4
 class MacOSSystemAudioBackend(AudioCaptureBackend):
     """Reads mono float32 PCM from the Swift Process Tap helper subprocess."""
 
+    # If the tap reports success at the API level (header emitted, IOProc
+    # registered, AudioDeviceStart returns noErr) but produces zero audio
+    # bytes within this window, treat the backend as broken and raise
+    # SystemAudioUnavailable so AudioCapture falls through to BlackHole. This
+    # is the failure mode we hit on macOS 15+/26 — the aggregate device claims
+    # to be running but the IOProc never fires.
+    _WATCHDOG_SECONDS = 3.0
+
     def __init__(self, device_name: str = "system_audio", target_rate: int = TARGET_RATE) -> None:
         self._device_name = "System Audio (Process Tap)"
         self._target_rate = target_rate
@@ -64,6 +72,7 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
         self._native_rate: int = 48000
         self._up = 1
         self._down = 1
+        self._bytes_received = 0
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -154,6 +163,36 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
         )
         self._stderr_thread.start()
 
+        # Watchdog — confirm audio actually flows. On macOS 15+/26 the tap
+        # silently produces no buffers, so we have to verify by data, not by
+        # API return codes. If nothing in 3s, tear down and let the caller
+        # fall back to BlackHole.
+        import time
+        deadline = time.monotonic() + self._WATCHDOG_SECONDS
+        while time.monotonic() < deadline:
+            if self._bytes_received > 0:
+                logger.info(
+                    "[audio/macos-system] watchdog passed: %d bytes received within %.1fs",
+                    self._bytes_received, self._WATCHDOG_SECONDS,
+                )
+                return
+            time.sleep(0.1)
+        logger.warning(
+            "[audio/macos-system] watchdog timeout: 0 bytes in %.1fs — "
+            "Process Tap is not delivering audio (known macOS 15+/26 issue). "
+            "Tearing down so AudioCapture can fall back.",
+            self._WATCHDOG_SECONDS,
+        )
+        # Best-effort teardown before raising.
+        self._stop_event.set()
+        self._running = False
+        self._terminate_helper()
+        raise SystemAudioUnavailable(
+            f"Native system audio capture produced no data in {self._WATCHDOG_SECONDS}s. "
+            "This is a known macOS 15+/26 issue with Core Audio process taps. "
+            "Falling back to BlackHole."
+        )
+
     def stop(self) -> None:
         self._stop_event.set()
         self._running = False
@@ -230,6 +269,7 @@ class MacOSSystemAudioBackend(AudioCaptureBackend):
                     )
                     break  # EOF — helper exited
                 bytes_received += len(chunk)
+                self._bytes_received = bytes_received  # for the start() watchdog
                 chunks_read += 1
                 now = time.monotonic()
                 if now - last_heartbeat >= 10.0:
