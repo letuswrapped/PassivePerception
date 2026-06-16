@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Passive Perception"
 BUNDLE_ID="com.passiveperception.app"
-VERSION="2.1.0"
+VERSION="2.1.1"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 DMG_NAME="PassivePerception-${VERSION}.dmg"
