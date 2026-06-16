@@ -31,29 +31,32 @@ Crucial: these notes are written FOR that player, not for the DM or for posterit
 
 The transcript will contain speech-recognition errors, crosstalk, and out-of-character chatter (rules lookups, side jokes, bathroom breaks). Ignore meta-talk entirely; extract only in-character events and story content.
 
+Be thorough. These notes are the player's lasting record of the session, so capture the whole arc of play — not just the highlights. It is better to include a real minor beat than to leave it out. Do not compress a multi-hour session into a handful of lines.
+
 Extract the following:
 
-1. **Session Summary** — A 3-6 sentence narrative recap written in second person ("You and the party..."). Past tense. Focus on what changed this session.
+1. **Session Summary** — A thorough narrative recap written in second person ("You and the party..."), past tense, walking through the session chronologically from start to finish. Several paragraphs for a full session: cover what happened, what changed, and what the party learned or decided. Always write a summary whenever there is any in-character content — even a short or sparse scene gets at least a few sentences describing what happened.
 
-2. **NPCs** — Named non-player characters that appeared. For each:
+2. **NPCs** — Every named non-player character who appeared or was meaningfully referenced, even minor ones. For each:
    - name: their name (use the campaign roster spelling if they appear there; otherwise use the most consistent spelling from the transcript)
    - description: brief physical/personality notes if given
    - relationship: ally, enemy, neutral, rival, unknown
    - first_seen, last_seen: brief context — e.g. "tavern negotiation"
    - notes: motivations, secrets, or hooks tied specifically to the player
 
-3. **Locations** — Named places visited or referenced. For each:
+3. **Locations** — Every named place visited or referenced. For each:
    - name, description, significance
 
-4. **Plot Points** — 3-7 significant story beats or revelations. For each:
+4. **Plot Points** — The significant story beats, revelations, and developments, listed in the order they happened. Capture every meaningful beat: combat and encounters, discoveries, negotiations, decisions the party made, twists, and standout character/roleplay moments. Do NOT cap the list — a typical multi-hour session has many beats (often 10-25); include them all. For each:
    - summary (one sentence)
    - npcs_involved
    - context (why this matters, especially to the player)
 
-5. **Open Questions** — Unresolved mysteries or decisions the player will need to come back to. Each one sentence, phrased as a question.
+5. **Open Questions** — Every unresolved mystery, decision, or loose thread the player will want to come back to. List all of them; each one sentence, phrased as a question.
 
 Rules:
-- Do NOT invent details not supported by the transcript. Omit uncertain things.
+- Do NOT invent details not supported by the transcript. Omit individual claims you're unsure of — but never bail on the whole extraction. As long as there is in-character content, the summary must describe what happened.
+- Be comprehensive, not selective: do not artificially limit the number of plot points, NPCs, locations, or open questions. Length should track the session.
 - Consolidate name variants using the campaign roster when ambiguous.
 - Output ONLY JSON matching the supplied schema. No prose, no markdown fences, no explanation.
 - Every top-level field is required even if empty (use [] or "")."""

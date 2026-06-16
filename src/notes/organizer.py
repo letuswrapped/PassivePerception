@@ -200,6 +200,11 @@ class NoteOrganizer:
                 response_mime_type="application/json",
                 response_schema=SessionNotes,
                 temperature=0.3,
+                # Richer, uncapped notes can run long for a full multi-hour
+                # session. Raise the output ceiling well above the model
+                # default so the JSON can't get truncated mid-stream (which
+                # would fail schema validation and drop the whole pass).
+                max_output_tokens=32768,
             ),
             call_label=f"notes {mode}",
         )
