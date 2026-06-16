@@ -129,8 +129,17 @@ class SessionManager:
         self._pass1_result = None
         self._diar_version = 0
 
-        name = session_name or self._started_at.strftime("%Y-%m-%d_session")
-        self._session_dir = Path(self._cfg["output"]["directory"]) / name
+        out_dir = Path(self._cfg["output"]["directory"])
+        base = session_name or self._started_at.strftime("%Y-%m-%d_session")
+        # De-collide same-day sessions (e.g. a test recording then the real one):
+        # without this the second session reuses the first's folder and silently
+        # overwrites it, locally and in the Obsidian export.
+        name = base
+        n = 2
+        while (out_dir / name).exists():
+            name = f"{base}_{n}"
+            n += 1
+        self._session_dir = out_dir / name
         self._session_dir.mkdir(parents=True, exist_ok=True)
 
         loop = asyncio.get_event_loop()
