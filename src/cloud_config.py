@@ -22,6 +22,11 @@ _APP_SUPPORT_DIR = Path(os.environ.get("PP_SUPPORT_DIR") or
 _APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
 _ENV_PATH = _APP_SUPPORT_DIR / ".env"
 
+# Obsidian export config lives alongside .env in Application Support — NOT in
+# the app bundle, which is read-only on a signed/notarized install (writing
+# there raises PermissionError and the config never persists).
+OBSIDIAN_CONFIG_PATH = _APP_SUPPORT_DIR / "obsidian_config.json"
+
 
 def load_keys() -> None:
     """Load API keys from the app's .env into os.environ."""

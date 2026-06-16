@@ -71,11 +71,22 @@ class FinalizeRequest(BaseModel):
     skip: bool = False
 
 
-# ── Obsidian config (persisted to disk) ──────────────────────────────────
-_OBSIDIAN_CONFIG_PATH = Path(__file__).parent.parent / "obsidian_config.json"
+# ── Obsidian config (persisted to Application Support) ────────────────────
+# Stored next to .env, NOT in the app bundle: the bundle is read-only on a
+# signed/notarized install, so writing the config there raised PermissionError
+# and it never persisted — silently disabling Obsidian export.
+_OBSIDIAN_CONFIG_PATH = cloud_config.OBSIDIAN_CONFIG_PATH
+# Legacy in-bundle / dev-repo location, kept only for one-time migration.
+_LEGACY_OBSIDIAN_CONFIG_PATH = Path(__file__).parent.parent / "obsidian_config.json"
 _obsidian_config: dict = {}
 
 def _load_obsidian_config() -> dict:
+    # One-time migration: lift a legacy in-bundle config into Application Support.
+    try:
+        if not _OBSIDIAN_CONFIG_PATH.exists() and _LEGACY_OBSIDIAN_CONFIG_PATH.exists():
+            _OBSIDIAN_CONFIG_PATH.write_text(_LEGACY_OBSIDIAN_CONFIG_PATH.read_text())
+    except Exception:
+        pass
     if _OBSIDIAN_CONFIG_PATH.exists():
         try:
             return json.loads(_OBSIDIAN_CONFIG_PATH.read_text())

@@ -142,8 +142,13 @@ def _export_to_obsidian(
       - NPCs/<name>.md     (one file per NPC)
       - Locations/<name>.md (one file per location)
     """
-    config_path = Path(__file__).parent.parent.parent / "obsidian_config.json"
+    from src import cloud_config
+    config_path = cloud_config.OBSIDIAN_CONFIG_PATH
     if not config_path.exists():
+        logger.warning(
+            "Obsidian export skipped — no config at %s "
+            "(set a vault in Settings → Obsidian)", config_path,
+        )
         return
     try:
         config = json.loads(config_path.read_text())
