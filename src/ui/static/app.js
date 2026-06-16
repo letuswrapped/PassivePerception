@@ -800,19 +800,37 @@ async function paintSettingsCampaignList() {
 
 async function loadSettingsMic() {
   const sel = $('set-mic-device');
-  sel.innerHTML = '<option value="">(none)</option>';
+  let defaultMic = null;
+  let devices = [];
   try {
-    const { devices } = await api('/devices');
-    (devices || []).forEach((d) => {
-      const opt = document.createElement('option');
-      opt.value = d.name;
-      opt.textContent = d.name;
-      sel.appendChild(opt);
-    });
+    const res = await api('/devices');
+    devices = res.devices || [];
+    defaultMic = res.default_mic || null;
   } catch {}
-  // Remember selection locally (backend doesn't persist)
+
+  // "System default" (empty value) → backend resolves to the Mac's current
+  // input. Label it with the device it currently resolves to so it's obvious.
+  const defaultLabel = defaultMic ? `System default — ${defaultMic}` : 'System default';
+  sel.innerHTML = `<option value="">${defaultLabel}</option>`;
+  devices.forEach((d) => {
+    const opt = document.createElement('option');
+    opt.value = d.name;
+    opt.textContent = d.name;
+    sel.appendChild(opt);
+  });
+  const off = document.createElement('option');
+  off.value = '__off__';
+  off.textContent = "Off — don't capture my voice";
+  sel.appendChild(off);
+
+  // Restore the saved selection (backend doesn't persist across restarts) and
+  // push it to the backend so it actually takes effect this launch — otherwise
+  // the backend keeps its default and the saved choice is silently ignored.
   const saved = localStorage.getItem('pp_mic_device') || '';
   sel.value = saved;
+  try {
+    await api('/settings/mic-device', { method: 'POST', body: JSON.stringify({ device: saved }) });
+  } catch {}
 }
 
 async function saveSettingsMic() {
@@ -823,6 +841,16 @@ async function saveSettingsMic() {
   } catch (e) {
     toast('Mic save failed: ' + e.message, 'error');
   }
+}
+
+// Push the saved mic preference to the backend on boot so it takes effect even
+// if Settings is never opened — in particular so an explicit "Off" is honored.
+// An empty value means "System default", which the backend resolves on its own.
+async function syncMicDeviceToBackend() {
+  const saved = localStorage.getItem('pp_mic_device') || '';
+  try {
+    await api('/settings/mic-device', { method: 'POST', body: JSON.stringify({ device: saved }) });
+  } catch {}
 }
 
 async function loadSettingsObsidian() {
@@ -1296,6 +1324,7 @@ async function boot() {
   await loadApiKeyStatus();
   await loadCampaigns();
   await loadActiveCampaign();
+  await syncMicDeviceToBackend();
 
   // Decide where to land
   const needsOnboarding =

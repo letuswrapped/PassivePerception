@@ -41,6 +41,13 @@ class AudioCaptureBackend(ABC):
         """Return the preferred loopback device (BlackHole, WASAPI loopback, etc.)."""
         ...
 
+    def default_input_device(self) -> dict | None:
+        """Return the system default input (mic), excluding loopback devices.
+
+        Overridden per-platform. Default implementation can't determine one.
+        """
+        return None
+
     @property
     @abstractmethod
     def sample_rate(self) -> int:

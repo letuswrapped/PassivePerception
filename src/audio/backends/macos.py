@@ -100,6 +100,27 @@ class MacOSAudioBackend(AudioCaptureBackend):
                 return dev
         return None
 
+    def default_input_device(self) -> dict | None:
+        """The system default input mic, excluding loopback (BlackHole).
+
+        Never returns a loopback device — mic-capturing the system-audio
+        loopback would echo Discord straight back into the transcript.
+        """
+        try:
+            default_idx = sd.default.device[0]
+        except Exception:
+            default_idx = -1
+        inputs = self.list_devices()
+        if isinstance(default_idx, int) and default_idx >= 0:
+            for dev in inputs:
+                if dev["index"] == default_idx and "blackhole" not in dev["name"].lower():
+                    return dev
+        # Fallback: first real (non-loopback) input device.
+        for dev in inputs:
+            if "blackhole" not in dev["name"].lower():
+                return dev
+        return None
+
     def _find_by_name(self, name: str) -> dict | None:
         name_lower = name.lower()
         for dev in self.list_devices():

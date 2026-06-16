@@ -27,3 +27,8 @@ def list_input_devices() -> list[dict]:
 
 def find_loopback_device() -> dict | None:
     return _get_backend().find_loopback_device()
+
+
+def default_input_device() -> dict | None:
+    """System default input mic (excluding loopback devices), or None."""
+    return _get_backend().default_input_device()

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src import cloud_config
-from src.audio.devices import list_input_devices
+from src.audio.devices import default_input_device, list_input_devices
 from src.campaign.models import Campaign
 from src.campaign.storage import CampaignStore, save_campaign, slugify
 from src.session.manager import SessionManager, SessionState
@@ -87,7 +87,27 @@ _obsidian_config = _load_obsidian_config()
 
 # ── Global session state ──────────────────────────────────────────────────────
 _session: SessionManager | None = None
+
+# Mic selection. `None` means "not configured" → resolve to the system default
+# input at session start so the local player's voice is captured out of the box.
+# The "__off__" sentinel is an explicit opt-out (no mic capture).
+_MIC_OFF = "__off__"
 _mic_device: str | None = None
+
+
+def _resolve_mic_device(value: str | None) -> str | None:
+    """Map the stored mic preference to an actual device name (or None for no mic).
+
+    - "__off__"        → None (user explicitly disabled mic capture)
+    - a device name    → that device
+    - None / ""        → the system default input mic
+    """
+    if value == _MIC_OFF:
+        return None
+    if value:
+        return value
+    dev = default_input_device()
+    return dev["name"] if dev else None
 
 
 # ── API key routes ───────────────────────────────────────────────────────────
@@ -227,6 +247,7 @@ async def get_devices():
     # ignores this field but it's emitted alongside `devices` for forward
     # compat — a future picker can switch primary capture without code churn.
     from src.audio.macos_helper import check_os_supported
+    default_mic = default_input_device()
     return {
         "primary": {
             "id": "system_audio",
@@ -234,17 +255,21 @@ async def get_devices():
             "available": check_os_supported(),
         },
         "devices": list_input_devices(),
+        # Name the device that "System default" resolves to, so the UI can
+        # label the auto option (e.g. "System default — A50 X").
+        "default_mic": default_mic["name"] if default_mic else None,
     }
 
 
 @app.post("/settings/mic-device")
 async def set_mic_device(payload: dict):
     global _mic_device
-    device_name = payload.get("device", "").strip() or None
-    _mic_device = device_name
+    raw = payload.get("device", "").strip() or None
+    _mic_device = raw
+    resolved = _resolve_mic_device(raw)
     if _session is not None:
-        _session.set_mic_device(device_name)
-    return {"ok": True, "device": device_name}
+        _session.set_mic_device(resolved)
+    return {"ok": True, "device": raw, "resolved": resolved}
 
 
 # ── Session polling routes ────────────────────────────────────────────────────
@@ -502,8 +527,14 @@ async def session_start(body: StartSessionRequest = StartSessionRequest()):
 
     _session = SessionManager(CONFIG, campaign=campaign)
 
-    if _mic_device:
-        _session.set_mic_device(_mic_device)
+    # Default to the system default mic unless the user explicitly turned it
+    # off — so the local player's own voice is captured without any setup.
+    mic = _resolve_mic_device(_mic_device)
+    if mic:
+        _session.set_mic_device(mic)
+        logger.info("[audio] Mic capture: %s", mic)
+    else:
+        logger.info("[audio] Mic capture disabled")
 
     await _session.start(session_name=body.session_name)
     return {"status": "started", "state": _session.state}
