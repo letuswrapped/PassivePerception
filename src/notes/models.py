@@ -61,3 +61,16 @@ class UtteranceTag(BaseModel):
 class Pass1Result(BaseModel):
     speakers: list[SpeakerSummary] = Field(default_factory=list)
     tags: list[UtteranceTag] = Field(default_factory=list)
+
+
+class Pass1LLMResponse(BaseModel):
+    """
+    What Gemini actually returns for Pass 1. Deliberately compact: rather than
+    a per-line tag for every utterance (which blows the output-token budget and
+    truncates on long sessions — a 2.5h session is ~1500 lines), it returns only
+    the indices of the OFF-TOPIC (table-talk) lines. Everything not listed is
+    in_character. The organizer expands this into the full Pass1Result.tags list,
+    so all downstream consumers (UI, filter, storage) are unaffected.
+    """
+    speakers: list[SpeakerSummary] = Field(default_factory=list)
+    other_indices: list[int] = Field(default_factory=list)

@@ -28,7 +28,7 @@ from google.genai import types as genai_types
 
 from src import cloud_config
 from src.campaign.models import Campaign
-from src.notes.models import Pass1Result, SessionNotes, UtteranceTag
+from src.notes.models import Pass1LLMResponse, Pass1Result, SessionNotes, UtteranceTag
 from src.notes.prompts import (
     build_pass1_system_prompt,
     build_pass1_user_prompt,
@@ -247,8 +247,13 @@ class NoteOrganizer:
             config=genai_types.GenerateContentConfig(
                 system_instruction=system,
                 response_mime_type="application/json",
-                response_schema=Pass1Result,
+                # Compact response: only the off-topic line indices, not a tag
+                # per line. Keeps output small so it can't truncate on long
+                # sessions (the old per-line schema overflowed and the whole
+                # pass fell back to "everything in_character").
+                response_schema=Pass1LLMResponse,
                 temperature=0.2,
+                max_output_tokens=32768,
             ),
             call_label="pass1",
         )
@@ -260,27 +265,23 @@ class NoteOrganizer:
             logger.warning("[notes] Gemini pass1 returned empty text")
             return None
         try:
-            result = Pass1Result.model_validate_json(raw)
+            llm = Pass1LLMResponse.model_validate_json(raw)
         except Exception as exc:
             logger.error("[notes] Failed to parse pass1 JSON: %s; raw[:400]=%s", exc, raw[:400])
             return None
 
-        # Normalize tags: pad any missing indices with "in_character" (safety),
-        # and clamp out-of-range indices. This is belt-and-suspenders — the
-        # prompt already insists on one tag per index, but LLMs miscount.
-        tag_by_idx = {t.index: t for t in result.tags}
-        normalized: list[UtteranceTag] = []
-        for i in range(len(transcript_lines)):
-            existing = tag_by_idx.get(i)
-            if existing and existing.tag in ("in_character", "other"):
-                normalized.append(UtteranceTag(index=i, tag=existing.tag))
-            else:
-                normalized.append(UtteranceTag(index=i, tag="in_character"))
-        result.tags = normalized
+        # Expand other_indices → full per-line tags. Anything not flagged as
+        # off-topic is in_character. Clamp to the valid range (LLMs miscount).
+        n = len(transcript_lines)
+        other = {i for i in llm.other_indices if 0 <= i < n}
+        tags = [
+            UtteranceTag(index=i, tag="other" if i in other else "in_character")
+            for i in range(n)
+        ]
+        result = Pass1Result(speakers=llm.speakers, tags=tags)
 
-        in_char = sum(1 for t in result.tags if t.tag == "in_character")
         logger.info(
             "[notes] Pass1 → %d speakers, %d in_character / %d other (of %d lines)",
-            len(result.speakers), in_char, len(result.tags) - in_char, len(transcript_lines),
+            len(result.speakers), n - len(other), len(other), n,
         )
         return result

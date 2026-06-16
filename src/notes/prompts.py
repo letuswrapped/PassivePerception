@@ -222,12 +222,9 @@ Your job is two things, both returned in one JSON response:
    - sample_quote_indices: pick 2 or 3 transcript-line indices (0-based) that best represent this speaker. Prefer clear, in-character lines that aren't one-word replies.
    - utterance_count and total_seconds will be computed from the transcript — still return a placeholder 0; the backend will overwrite.
 
-2. **Per-utterance classification.** For EVERY transcript line, return one tag:
-   - "in_character": on-topic D&D content. In-character dialogue, GM narration, combat resolution, declared actions, descriptions of scenes, plot beats, spells being cast, exploration, roleplay.
-   - "other": anything else. Rules lookups ("what's the DC?"), dice math, bathroom breaks, pizza orders, jokes between players, real-world tangents, app/tech troubleshooting.
-   When uncertain, prefer "in_character" — we'd rather keep ambiguous content than drop a real plot beat.
+2. **Off-topic line indices.** Return `other_indices`: the list of transcript line indices (the [N] prefix) that are NOT in-character game content. Off-topic ("other") means: rules lookups ("what's the DC?"), dice math, bathroom breaks, pizza orders, jokes between players, real-world tangents, app/tech troubleshooting. Everything you do NOT list is treated as in_character (on-topic D&D content: in-character dialogue, GM narration, combat resolution, declared actions, scene descriptions, plot beats, spells, exploration, roleplay). When uncertain, leave a line OUT of other_indices — we'd rather keep ambiguous content than drop a real plot beat. Most lines are in_character, so other_indices is usually a short list.
 
-Output ONLY JSON matching the supplied Pass1Result schema. Every transcript line index MUST appear exactly once in the tags array."""
+Output ONLY JSON matching the supplied schema (speakers + other_indices)."""
 
 
 def build_pass1_system_prompt(campaign: Campaign | None) -> str:
@@ -264,8 +261,9 @@ def build_pass1_user_prompt(transcript_lines: list[str]) -> str:
     body = "Here is the diarized transcript. Each line is prefixed with its index:\n\n"
     body += "\n".join(transcript_lines)
     body += (
-        "\n\nProduce the Pass1Result JSON. "
-        "Remember: EVERY index 0..{last} must appear exactly once in tags[].index."
+        "\n\nProduce the JSON (speakers + other_indices). "
+        "Valid line indices are 0..{last}. List in other_indices ONLY the lines "
+        "that are off-topic table-talk; everything else is treated as in_character."
     ).format(last=len(transcript_lines) - 1 if transcript_lines else 0)
     return body
 
